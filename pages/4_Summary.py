@@ -1,15 +1,22 @@
 import streamlit as st
+
+from utils.auth import require_login
 from utils.db import get_connection
 
 st.set_page_config(page_title="Summary", page_icon="📊", layout="wide")
 
+current_user = require_login()
 
-def fetch_expenses():
+
+def fetch_expenses(household_id):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT
             id,
+            household_id,
+            created_by_user_id,
             child_name,
             category,
             description,
@@ -26,17 +33,29 @@ def fetch_expenses():
             notes,
             created_at
         FROM expenses
+        WHERE household_id = ?
         ORDER BY expense_date DESC, id DESC
-    """)
+        """,
+        (household_id,),
+    )
     rows = cursor.fetchall()
     conn.close()
     return rows
 
 
-rows = fetch_expenses()
+household_id = current_user.get("household_id")
+if not household_id:
+    st.error("Your account is not linked to a household yet.")
+    st.stop()
+
+rows = fetch_expenses(household_id)
 
 st.title("📊 Summary Dashboard")
 st.write("See totals, balances, and overall reimbursement flow between co-parents.")
+st.caption(
+    f"Signed in as {current_user['user_name']} • "
+    f"Household: {current_user.get('household_name', 'Unknown Household')}"
+)
 
 if not rows:
     st.info("No expenses found yet. Add an expense first.")
@@ -44,34 +63,33 @@ if not rows:
 
 expenses = []
 for row in rows:
-    amount = float(row[4] or 0)
-    amount_owed = float(row[10] or 0)
-    amount_paid = float(row[11] or 0)
+    amount = float(row["amount"] or 0)
+    amount_owed = float(row["amount_owed"] or 0)
+    amount_paid = float(row["amount_paid"] or 0)
     outstanding = round(amount_owed - amount_paid, 2)
 
     expenses.append(
         {
-            "id": row[0],
-            "child_name": row[1] or "",
-            "category": row[2] or "",
-            "description": row[3] or "",
+            "id": row["id"],
+            "child_name": row["child_name"] or "",
+            "category": row["category"] or "",
+            "description": row["description"] or "",
             "amount": amount,
-            "expense_date": row[5],
-            "paid_by": row[6] or "",
-            "owed_by": row[7] or "",
-            "split_type": row[8] or "",
-            "split_value": float(row[9] or 0),
+            "expense_date": row["expense_date"],
+            "paid_by": row["paid_by"] or "",
+            "owed_by": row["owed_by"] or "",
+            "split_type": row["split_type"] or "",
+            "split_value": float(row["split_value"] or 0),
             "amount_owed": amount_owed,
             "amount_paid": amount_paid,
             "outstanding": outstanding,
-            "status": row[12] or "",
-            "receipt_path": row[13] or "",
-            "notes": row[14] or "",
-            "created_at": row[15] or "",
+            "status": row["status"] or "",
+            "receipt_path": row["receipt_path"] or "",
+            "notes": row["notes"] or "",
+            "created_at": row["created_at"] or "",
         }
     )
 
-# Overall totals
 total_expenses = round(sum(item["amount"] for item in expenses), 2)
 total_owed = round(sum(item["amount_owed"] for item in expenses), 2)
 total_paid = round(sum(item["amount_paid"] for item in expenses), 2)
@@ -85,7 +103,6 @@ m4.metric("Outstanding", f"${total_outstanding:,.2f}")
 
 st.divider()
 
-# Status breakdown
 outstanding_count = sum(1 for item in expenses if item["status"] == "outstanding")
 partial_count = sum(1 for item in expenses if item["status"] == "partial")
 paid_count = sum(1 for item in expenses if item["status"] == "paid")
@@ -97,7 +114,6 @@ s3.metric("Paid Items", paid_count)
 
 st.divider()
 
-# Per-child summary
 child_summary = {}
 for item in expenses:
     child = item["child_name"] or "Unknown"
@@ -132,9 +148,7 @@ st.dataframe(child_rows, use_container_width=True)
 
 st.divider()
 
-# Parent-to-parent balance summary
 pair_summary = {}
-
 for item in expenses:
     pair_key = f"{item['owed_by']} owes {item['paid_by']}"
     if pair_key not in pair_summary:
@@ -165,9 +179,7 @@ st.dataframe(pair_rows, use_container_width=True)
 
 st.divider()
 
-# Category summary
 category_summary = {}
-
 for item in expenses:
     category = item["category"] or "Uncategorized"
     if category not in category_summary:
@@ -195,7 +207,6 @@ st.dataframe(category_rows, use_container_width=True)
 
 st.divider()
 
-# Recent expenses
 st.subheader("Recent Expenses")
 
 recent_rows = []

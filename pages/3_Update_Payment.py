@@ -1,15 +1,22 @@
 import streamlit as st
+
+from utils.auth import require_login
 from utils.db import get_connection
 
 st.set_page_config(page_title="Update Payment", page_icon="💳", layout="wide")
 
+current_user = require_login()
 
-def fetch_expenses():
+
+def fetch_expenses(household_id):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT
             id,
+            household_id,
+            created_by_user_id,
             child_name,
             category,
             description,
@@ -17,17 +24,15 @@ def fetch_expenses():
             expense_date,
             paid_by,
             owed_by,
-            split_type,
-            split_value,
             amount_owed,
             amount_paid,
-            status,
-            receipt_path,
-            notes,
-            created_at
+            status
         FROM expenses
+        WHERE household_id = ?
         ORDER BY expense_date DESC, id DESC
-    """)
+        """,
+        (household_id,),
+    )
     rows = cursor.fetchall()
     conn.close()
     return rows
@@ -36,30 +41,53 @@ def fetch_expenses():
 def calculate_status(amount_owed, amount_paid):
     if amount_paid <= 0:
         return "outstanding"
-    elif amount_paid < amount_owed:
+    if amount_paid < amount_owed:
         return "partial"
     return "paid"
 
 
-def update_payment(expense_id, new_amount_paid, new_status):
+def update_payment(expense_id, household_id, current_user_id, new_amount_paid, new_status):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
         """
         UPDATE expenses
-        SET amount_paid = ?, status = ?
+        SET
+            amount_paid = ?,
+            status = ?,
+            updated_by_user_id = ?
         WHERE id = ?
+          AND household_id = ?
+          AND created_by_user_id = ?
         """,
-        (new_amount_paid, new_status, expense_id),
+        (
+            new_amount_paid,
+            new_status,
+            current_user_id,
+            expense_id,
+            household_id,
+            current_user_id,
+        ),
     )
+    affected = cursor.rowcount
     conn.commit()
     conn.close()
+    return affected > 0
 
+
+household_id = current_user.get("household_id")
+if not household_id:
+    st.error("Your account is not linked to a household yet.")
+    st.stop()
 
 st.title("💳 Update Payment")
-st.write("Apply a reimbursement payment to an expense and update its status.")
+st.write("Apply a reimbursement payment to one of your household expenses.")
+st.caption(
+    f"Signed in as {current_user['user_name']} • "
+    f"Household: {current_user.get('household_name', 'Unknown Household')}"
+)
 
-rows = fetch_expenses()
+rows = fetch_expenses(household_id)
 
 if not rows:
     st.info("No expenses found yet. Add an expense first.")
@@ -69,33 +97,29 @@ expense_options = []
 expense_lookup = {}
 
 for row in rows:
-    expense_id = row[0]
-    child_name = row[1] or ""
-    category = row[2] or ""
-    description = row[3] or ""
-    amount = float(row[4] or 0)
-    expense_date = row[5]
-    paid_by = row[6] or ""
-    owed_by = row[7] or ""
-    amount_owed = float(row[10] or 0)
-    amount_paid = float(row[11] or 0)
-    status = row[12] or ""
+    amount = float(row["amount"] or 0)
+    amount_owed = float(row["amount_owed"] or 0)
+    amount_paid = float(row["amount_paid"] or 0)
     outstanding = round(amount_owed - amount_paid, 2)
 
-    label = f"#{expense_id} | {expense_date} | {child_name} | {category} | ${amount:,.2f} | Outstanding: ${outstanding:,.2f}"
+    label = (
+        f"#{row['id']} | {row['expense_date']} | {row['child_name'] or ''} | "
+        f"{row['category'] or ''} | ${amount:,.2f} | Outstanding: ${outstanding:,.2f}"
+    )
     expense_options.append(label)
     expense_lookup[label] = {
-        "id": expense_id,
-        "child_name": child_name,
-        "category": category,
-        "description": description,
+        "id": row["id"],
+        "created_by_user_id": row["created_by_user_id"],
+        "child_name": row["child_name"] or "",
+        "category": row["category"] or "",
+        "description": row["description"] or "",
         "amount": amount,
-        "expense_date": expense_date,
-        "paid_by": paid_by,
-        "owed_by": owed_by,
+        "expense_date": row["expense_date"],
+        "paid_by": row["paid_by"] or "",
+        "owed_by": row["owed_by"] or "",
         "amount_owed": amount_owed,
         "amount_paid": amount_paid,
-        "status": status,
+        "status": row["status"] or "",
         "outstanding": outstanding,
     }
 
@@ -119,6 +143,10 @@ with right:
     st.write(f"**Outstanding Balance:** ${selected['outstanding']:,.2f}")
     st.write(f"**Current Status:** {selected['status']}")
 
+if selected["created_by_user_id"] != current_user["user_id"]:
+    st.warning("Only the person who created this expense can update the payment on it.")
+    st.stop()
+
 st.divider()
 
 payment_amount = st.number_input(
@@ -136,14 +164,27 @@ if st.button("Apply Payment", type="primary"):
         st.error("Enter a payment amount greater than 0.")
     else:
         new_amount_paid = round(selected["amount_paid"] + payment_amount, 2)
+        if new_amount_paid > selected["amount_owed"]:
+            new_amount_paid = selected["amount_owed"]
+
         new_status = calculate_status(selected["amount_owed"], new_amount_paid)
         new_outstanding = round(selected["amount_owed"] - new_amount_paid, 2)
 
-        update_payment(selected["id"], new_amount_paid, new_status)
-
-        st.success("Payment updated successfully.")
-        st.info(
-            f"New amount paid: ${new_amount_paid:,.2f} | "
-            f"New outstanding balance: ${new_outstanding:,.2f} | "
-            f"Status: {new_status}"
+        updated = update_payment(
+            expense_id=selected["id"],
+            household_id=household_id,
+            current_user_id=current_user["user_id"],
+            new_amount_paid=new_amount_paid,
+            new_status=new_status,
         )
+
+        if updated:
+            st.success("Payment updated successfully.")
+            st.info(
+                f"New amount paid: ${new_amount_paid:,.2f} | "
+                f"New outstanding balance: ${new_outstanding:,.2f} | "
+                f"Status: {new_status}"
+            )
+            st.rerun()
+        else:
+            st.error("Update failed. You may not have permission to update this expense.")

@@ -1,20 +1,26 @@
-import streamlit as st
-from utils.db import get_connection
-from utils.receipt_utils import render_receipt
 from pathlib import Path
 
+import streamlit as st
+
+from utils.auth import require_login
+from utils.db import get_connection
+from utils.receipt_utils import render_receipt
 
 st.set_page_config(page_title="Ledger", page_icon="📒", layout="wide")
 
+current_user = require_login()
 
-def fetch_expenses():
+
+def fetch_expenses(household_id):
     conn = get_connection()
-    conn.row_factory = None
     cursor = conn.cursor()
-
-    cursor.execute("""
+    cursor.execute(
+        """
         SELECT
             id,
+            household_id,
+            created_by_user_id,
+            updated_by_user_id,
             child_name,
             category,
             description,
@@ -31,18 +37,29 @@ def fetch_expenses():
             notes,
             created_at
         FROM expenses
+        WHERE household_id = ?
         ORDER BY expense_date DESC, id DESC
-    """)
-
+        """,
+        (household_id,),
+    )
     rows = cursor.fetchall()
     conn.close()
     return rows
 
 
+household_id = current_user.get("household_id")
+if not household_id:
+    st.error("Your account is not linked to a household yet.")
+    st.stop()
+
 st.title("📒 Expense Ledger")
 st.write("View all shared expenses, payment status, and outstanding balances.")
+st.caption(
+    f"Signed in as {current_user['user_name']} • "
+    f"Household: {current_user.get('household_name', 'Unknown Household')}"
+)
 
-rows = fetch_expenses()
+rows = fetch_expenses(household_id)
 
 if not rows:
     st.info("No expenses saved yet. Go to Add Expense and create your first entry.")
@@ -50,37 +67,37 @@ if not rows:
 
 expenses = []
 for row in rows:
-    amount = float(row[4] or 0)
-    amount_owed = float(row[10] or 0)
-    amount_paid = float(row[11] or 0)
+    amount = float(row["amount"] or 0)
+    amount_owed = float(row["amount_owed"] or 0)
+    amount_paid = float(row["amount_paid"] or 0)
     outstanding = round(amount_owed - amount_paid, 2)
 
     expenses.append(
         {
-            "id": row[0],
-            "child_name": row[1] or "",
-            "category": row[2] or "",
-            "description": row[3] or "",
+            "id": row["id"],
+            "child_name": row["child_name"] or "",
+            "category": row["category"] or "",
+            "description": row["description"] or "",
             "amount": amount,
-            "expense_date": row[5],
-            "paid_by": row[6] or "",
-            "owed_by": row[7] or "",
-            "split_type": row[8] or "",
-            "split_value": float(row[9] or 0),
+            "expense_date": row["expense_date"],
+            "paid_by": row["paid_by"] or "",
+            "owed_by": row["owed_by"] or "",
+            "split_type": row["split_type"] or "",
+            "split_value": float(row["split_value"] or 0),
             "amount_owed": amount_owed,
             "amount_paid": amount_paid,
             "outstanding": outstanding,
-            "status": row[12] or "",
-            "receipt_path": row[13] or "",
-            "notes": row[14] or "",
-            "created_at": row[15] if len(row) > 15 else "",
+            "status": row["status"] or "",
+            "receipt_path": row["receipt_path"] or "",
+            "notes": row["notes"] or "",
+            "created_at": row["created_at"] or "",
         }
     )
 
-total_amount = round(sum(item.get("amount", 0) for item in expenses), 2)
-total_owed = round(sum(item.get("amount_owed", 0) for item in expenses), 2)
-total_paid = round(sum(item.get("amount_paid", 0) for item in expenses), 2)
-total_outstanding = round(sum(item.get("outstanding", 0) for item in expenses), 2)
+total_amount = round(sum(item["amount"] for item in expenses), 2)
+total_owed = round(sum(item["amount_owed"] for item in expenses), 2)
+total_paid = round(sum(item["amount_paid"] for item in expenses), 2)
+total_outstanding = round(sum(item["outstanding"] for item in expenses), 2)
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Total Expenses", f"${total_amount:,.2f}")
@@ -144,15 +161,18 @@ for item in filtered:
         }
     )
 
-
 st.subheader("Saved Expenses")
-st.dataframe(display_rows, width="stretch")
+st.dataframe(display_rows, use_container_width=True)
 
 st.subheader("Expense Details")
 st.caption("Open an expense below to preview or download its receipt.")
 
 for item in filtered:
-    with st.expander(f"#{item['id']} • {item['expense_date']} • {item['category']} • ${item['amount']:,.2f}"):
+    header = (
+        f"#{item['id']} • {item['expense_date']} • "
+        f"{item['category']} • ${item['amount']:,.2f}"
+    )
+    with st.expander(header):
         left, right = st.columns(2)
 
         with left:
@@ -170,5 +190,4 @@ for item in filtered:
             st.write(f"**Split:** {item['split_value']:,.2f}%")
 
         st.write(f"**Notes:** {item['notes'] or '-'}")
-
         render_receipt(item["receipt_path"], key_prefix=f"ledger_{item['id']}")

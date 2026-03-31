@@ -1,5 +1,4 @@
 import streamlit as st
-
 from utils.auth import login_user, logout_user, is_logged_in, get_current_user
 
 st.set_page_config(page_title="Log In", page_icon="🔐", layout="wide")
@@ -10,7 +9,10 @@ st.write("Log in to your shared expense account.")
 if is_logged_in():
     user = get_current_user()
     st.success(f"You are currently logged in as {user['user_name']}.")
-    st.info(f"Household: {user.get('household_name', 'Unknown Household')}")
+    st.info(f"Household: {user['household_name']}")
+
+    if st.button("Go to Home", type="primary"):
+        st.rerun()
 
     if st.button("Log Out"):
         logout_user()
@@ -33,7 +35,6 @@ if submitted:
         success, error_message = login_user(email.strip(), password)
 
         if success:
-            st.success("Logged in successfully.")
-            st.info("Use the sidebar to continue.")
+            st.rerun()
         else:
             st.error(error_message)

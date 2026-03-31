@@ -28,7 +28,7 @@ def get_current_user_email(user_id: int):
 
     try:
         return row["email"]
-    except (TypeError, KeyError, IndexError):
+    except Exception:
         return row[0]
 
 
@@ -60,11 +60,15 @@ if submitted:
                 invited_by_user_id=current_user["user_id"],
             )
 
+            signup_link = f"http://localhost:8501/Sign_Up?invite={token}"
+
             st.success("Invite created.")
+            st.write("Share this sign-up link with the invited user:")
+            st.code(signup_link)
+
+            st.write("Or share this invite code:")
             st.code(token)
-            st.info(
-                "Have the other user sign up with that email address, then open the Accept Invite page and paste this code."
-            )
+
         except ValueError as exc:
             st.error(str(exc))
         except Exception as exc:

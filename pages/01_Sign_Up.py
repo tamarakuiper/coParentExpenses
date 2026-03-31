@@ -21,7 +21,6 @@ def invite_get(invite, key, default=None):
     except Exception:
         pass
 
-    # Fallback for tuple-style rows
     mapping = {
         "id": 0,
         "household_id": 1,
@@ -55,25 +54,47 @@ if is_logged_in():
     st.info(f"Household: {user['household_name']}")
     st.stop()
 
-with st.form("sign_up_form"):
-    full_name = st.text_input("Full Name")
-    email = st.text_input("Email")
-    password = st.text_input("Password", type="password")
-    confirm_password = st.text_input("Confirm Password", type="password")
-    invite_code = st.text_input("Invite Code (optional)")
+query_params = st.query_params
+invite_from_url = query_params.get("invite", "")
 
-    invite = None
-    normalized_code = invite_code.strip()
-    if normalized_code:
-        invite = get_invite_by_token(normalized_code)
+if isinstance(invite_from_url, list):
+    invite_from_url = invite_from_url[0] if invite_from_url else ""
 
-    if invite:
+invite_code = st.text_input(
+    "Invite Code (optional)",
+    value=invite_from_url,
+)
+
+normalized_code = invite_code.strip()
+invite = get_invite_by_token(normalized_code) if normalized_code else None
+invite_valid = invite is not None
+
+prefilled_email = invite_get(invite, "invited_email", "") if invite_valid else ""
+
+if normalized_code:
+    if invite_valid:
         st.info(
             f"You are joining: {invite_get(invite, 'household_name')} "
             f"(invited by {invite_get(invite, 'inviter_name')})"
         )
-        household_name = ""
     else:
+        st.warning("Invite code not found or invalid.")
+
+with st.form("sign_up_form"):
+    full_name = st.text_input("Full Name")
+
+    email = st.text_input(
+        "Email",
+        value=prefilled_email,
+        disabled=invite_valid,
+        placeholder="name@example.com",
+    )
+
+    password = st.text_input("Password", type="password")
+    confirm_password = st.text_input("Confirm Password", type="password")
+
+    household_name = ""
+    if not normalized_code:
         household_name = st.text_input(
             "Household Name",
             placeholder="Example: Tamara & Matt Household",
@@ -82,8 +103,7 @@ with st.form("sign_up_form"):
     submitted = st.form_submit_button("Create Account", type="primary")
 
 if submitted:
-    normalized_email = email.strip().lower()
-    normalized_code = invite_code.strip()
+    normalized_email = (prefilled_email if invite_valid else email).strip().lower()
 
     if not full_name.strip():
         st.error("Full Name is required.")
@@ -95,17 +115,17 @@ if submitted:
         st.error("Password must be at least 8 characters long.")
     elif password != confirm_password:
         st.error("Passwords do not match.")
-    elif normalized_code and not invite:
+    elif normalized_code and not invite_valid:
         st.error("Invite code is invalid.")
-    elif invite and invite_get(invite, "invited_email", "").strip().lower() != normalized_email:
+    elif invite_valid and invite_get(invite, "invited_email", "").strip().lower() != normalized_email:
         st.error("This invite code was issued for a different email address.")
-    elif not invite and not household_name.strip():
+    elif not normalized_code and not household_name.strip():
         st.error("Household Name is required when no invite code is used.")
     else:
         try:
-            if invite:
+            if normalized_code:
                 user_id = create_user(
-                    full_name=full_name,
+                    full_name=full_name.strip(),
                     email=normalized_email,
                     password=password,
                 )
@@ -121,7 +141,7 @@ if submitted:
                     st.stop()
             else:
                 create_user_with_household(
-                    full_name=full_name,
+                    full_name=full_name.strip(),
                     email=normalized_email,
                     password=password,
                     household_name=household_name.strip(),
@@ -130,8 +150,7 @@ if submitted:
             success, error_message = login_user(normalized_email, password)
 
             if success:
-                st.success("Account created successfully.")
-                st.info("Use the sidebar to continue.")
+                st.switch_page("Home.py")
             else:
                 st.warning("Account was created, but automatic login failed.")
                 st.info(error_message)

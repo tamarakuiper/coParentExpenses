@@ -3,7 +3,7 @@ import streamlit as st
 from utils.auth import require_login
 from utils.db import get_connection
 
-st.set_page_config(page_title="Update Payment", page_icon="💳", layout="wide")
+st.set_page_config(page_title="Add Payment", page_icon="💳", layout="wide")
 
 current_user = require_login()
 
@@ -80,7 +80,7 @@ if not household_id:
     st.error("Your account is not linked to a household yet.")
     st.stop()
 
-st.title("💳 Update Payment")
+st.title("💳 Add Payment")
 st.write("Apply a reimbursement payment to one of your household expenses.")
 st.caption(
     f"Signed in as {current_user['user_name']} • "
@@ -144,7 +144,7 @@ with right:
     st.write(f"**Current Status:** {selected['status']}")
 
 if selected["created_by_user_id"] != current_user["user_id"]:
-    st.warning("Only the person who created this expense can update the payment on it.")
+    st.warning("Only the person who created this expense can add the payment on it.")
     st.stop()
 
 st.divider()
@@ -179,7 +179,7 @@ if st.button("Apply Payment", type="primary"):
         )
 
         if updated:
-            st.success("Payment updated successfully.")
+            st.success("Payment added successfully.")
             st.info(
                 f"New amount paid: ${new_amount_paid:,.2f} | "
                 f"New outstanding balance: ${new_outstanding:,.2f} | "

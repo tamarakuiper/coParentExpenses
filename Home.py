@@ -1,193 +1,201 @@
 import streamlit as st
 
+from utils.auth import is_logged_in, get_current_user, logout_user, require_login
+from utils.db import get_connection
+from utils.invites import create_household_invite
+from utils.household_admin import fetch_household_members, remove_household_member
+
 st.set_page_config(
-    page_title="SharedCare Ledger",
-    page_icon="💼",
+    page_title="Co-Parent Shared Expenses",
+    page_icon="🏠",
     layout="wide",
 )
 
-st.markdown(
-    """
-    <style>
-        .hero {
-            padding: 2.5rem 2rem;
-            border-radius: 20px;
-            background: linear-gradient(135deg, #eef4ff 0%, #f8fbff 100%);
-            border: 1px solid #d9e6ff;
-            margin-bottom: 1.25rem;
-        }
-        .hero h1 {
-            font-size: 2.7rem;
-            margin-bottom: 0.4rem;
-            color: #12325b;
-        }
-        .hero p {
-            font-size: 1.05rem;
-            color: #355070;
-            max-width: 760px;
-            margin-bottom: 0;
-        }
-        .summary-box {
-            background: #ffffff;
-            border: 1px solid #e6ebf2;
-            border-radius: 16px;
-            padding: 1rem 1.25rem;
-            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-        }
-        .summary-box h4 {
-            margin: 0 0 0.5rem 0;
-            color: #16324f;
-        }
-        .footer-note {
-            color: #6b7280;
-            font-size: 0.9rem;
-            margin-top: 2rem;
-            text-align: center;
-        }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
 
-st.markdown(
-    """
-    <div class="hero">
-        <h1>💼 SharedCare Ledger</h1>
-        <p>
-            A cleaner way for co-parents to track shared child expenses, upload receipts,
-            monitor reimbursements, and see what is still outstanding.
-        </p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-left, right = st.columns([2, 1])
-
-with left:
-    st.subheader("Shared expenses, clearly tracked.")
-    st.write(
-        "Keep a single record of school, medical, childcare, and activity expenses "
-        "with documentation and status tracking in one place."
-    )
-
-    cta1, cta2 = st.columns(2)
-    with cta1:
-        st.button("Get Started", type="primary", use_container_width=True)
-    with cta2:
-        st.button("View Demo", use_container_width=True)
-
-with right:
-    st.markdown(
+def get_current_user_email(user_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
         """
-        <div class="summary-box">
-            <h4>Live Summary</h4>
-            Total shared expenses: <strong>$842.15</strong><br>
-            Reimbursed: <strong>$420.00</strong><br>
-            Outstanding: <strong>$422.15</strong><br><br>
-            <em>14 of 16 expenses have matching receipts</em>
-        </div>
+        SELECT email
+        FROM users
+        WHERE id = ?
         """,
-        unsafe_allow_html=True,
+        (user_id,),
     )
+    row = cursor.fetchone()
+    conn.close()
 
-st.divider()
+    if not row:
+        return None
 
-with st.expander("Core Features"):
-    col1, col2 = st.columns(2)
+    try:
+        return row["email"]
+    except Exception:
+        return row[0]
 
-    with col1:
-        st.markdown(
-            """
-            **Expense Tracking**
-            
-            Log medical, school, childcare, activities, transportation,
-            and other shared child expenses in one place.
 
-            **Receipt Uploads**
-            
-            Attach receipts, invoices, and supporting documents directly
-            to each expense entry.
+def render_logged_out_home():
+    st.title("🏠 Co-Parent Shared Expenses")
+    st.write("Track shared child-related expenses in one place.")
+    st.write("Please log in or sign up to continue.")
+    st.caption("If you were invited, use the Sign Up page and enter your invite code there.")
 
-            **Payment Status**
-            
-            Track whether an expense is outstanding, partially paid, or fully reimbursed.
-            """
+
+def render_logged_in_home():
+    current_user = require_login()
+    current_user_email = get_current_user_email(current_user["user_id"])
+
+    st.title("🏠 Co-Parent Shared Expenses")
+    st.success(f"Logged in as {current_user['user_name']}")
+    st.info(f"Household: {current_user['household_name']}")
+
+    st.write("Use the menu on the left to manage your household expenses.")
+
+    st.markdown("---")
+    st.subheader("Invite another user")
+
+    with st.form("invite_user_form"):
+        invited_email = st.text_input("Invitee Email", placeholder="name@example.com")
+        submitted = st.form_submit_button("Create Invite", type="primary")
+
+    if submitted:
+        normalized_invited_email = invited_email.strip().lower()
+        normalized_current_email = (current_user_email or "").strip().lower()
+
+        if not normalized_invited_email:
+            st.error("Email is required.")
+        elif normalized_current_email and normalized_invited_email == normalized_current_email:
+            st.error("You cannot invite yourself.")
+        else:
+            try:
+                token = create_household_invite(
+                    invited_email=invited_email,
+                    invited_by_user_id=current_user["user_id"],
+                )
+
+                signup_link = f"http://localhost:8501/Sign_Up?invite={token}"
+
+                st.success("Invite created.")
+                st.write("Share this sign-up link:")
+                st.code(signup_link)
+
+                st.write("Or share this invite code:")
+                st.code(token)
+
+             
+
+            except ValueError as exc:
+                st.error(str(exc))
+            except Exception as exc:
+                st.error(f"Something went wrong while creating the invite: {exc}")
+        st.markdown("---")
+    st.subheader("Manage household")
+
+    members = fetch_household_members(current_user["household_id"])
+
+    removable_members = []
+    for member in members:
+        try:
+            member_user_id = member["user_id"]
+            member_name = member["full_name"]
+            member_email = member["email"]
+            member_role = member["role"]
+        except Exception:
+            member_user_id = member[0]
+            member_role = member[1]
+            member_name = member[3]
+            member_email = member[4]
+
+        label = f"{member_name} ({member_email}) — {member_role}"
+        st.write(label)
+
+        if current_user.get("role") == "owner" and member_user_id != current_user["user_id"] and member_role != "owner":
+            removable_members.append(
+                {
+                    "user_id": member_user_id,
+                    "label": label,
+                }
+            )
+
+    if current_user.get("role") != "owner":
+        st.info("Only the household owner can manage members.")
+    elif not removable_members:
+        st.info("There are no removable members in this household.")
+    else:
+        options = {item["label"]: item["user_id"] for item in removable_members}
+
+        selected_label = st.selectbox(
+            "Select a household member to remove",
+            list(options.keys()),
+            key="remove_member_select",
         )
 
-    with col2:
-        st.markdown(
-            """
-            **Shared Visibility**
-            
-            Give both parents access to the same expense ledger for transparency.
-
-            **Balance Overview**
-            
-            See submitted, reimbursed, and outstanding totals at a glance.
-
-            **Export-Ready Records**
-            
-            Keep documentation organized for personal records, mediation, or legal review.
-            """
+        confirm_remove = st.checkbox(
+            "I understand this will remove this user's access to the household.",
+            key="confirm_remove_member",
         )
 
-with st.expander("How It Works"):
-    step1, step2, step3, step4 = st.columns(4)
+        if st.button("Remove User", type="secondary"):
+            if not confirm_remove:
+                st.error("Please confirm removal first.")
+            else:
+                target_user_id = options[selected_label]
+                ok, message = remove_household_member(
+                    household_id=current_user["household_id"],
+                    acting_user_id=current_user["user_id"],
+                    target_user_id=target_user_id,
+                )
 
-    with step1:
-        st.markdown("### 1")
-        st.write("Add a child-related expense with the amount, date, category, and notes.")
+                if ok:
+                    st.success(message)
+                    st.rerun()
+                else:
+                    st.error(message)
 
-    with step2:
-        st.markdown("### 2")
-        st.write("Upload a receipt or invoice so the expense has supporting documentation.")
 
-    with step3:
-        st.markdown("### 3")
-        st.write("Share the record with the co-parent inside one organized ledger.")
+def render_home():
+    if is_logged_in():
+        render_logged_in_home()
+    else:
+        render_logged_out_home()
 
-    with step4:
-        st.markdown("### 4")
-        st.write("Update payments as reimbursements are made and received.")
 
-with st.expander("Built for clarity and accountability"):
-    st.write(
-        "SharedCare Ledger is designed for cooperative financial recordkeeping "
-        "with clear documentation, shared visibility, and a professional audit trail."
-    )
-    st.write(
-        "It is intended for co-parents who want a respectful, transparent way "
-        "to manage shared expenses without relying on texts, email chains, "
-        "or scattered spreadsheets."
-    )
+def render_logout():
+    st.title("🚪 Log Out")
+    logout_user()
+    st.success("You have been logged out.")
+    st.rerun()
 
-with st.expander("Planned Features"):
-    st.markdown(
-        """
-        - Secure document storage
-        - Recurring expenses
-        - Payment reminders
-        - Monthly summaries
-        - Downloadable reimbursement reports
-        - Parent account permissions
-        """
-    )
 
-st.divider()
+home_page = st.Page(render_home, title="Home", icon="🏠", default=True)
 
-footer_left, footer_right = st.columns([3, 1])
+login_page = st.Page("pages/02_Log_In.py", title="Login", icon="🔐")
+signup_page = st.Page("pages/01_Sign_Up.py", title="Signup", icon="🆕")
 
-with footer_left:
-    st.markdown("### Start organizing shared expenses with confidence")
-    st.write(
-        "Reduce confusion, keep every receipt in one place, and maintain a clear record of what is owed."
-    )
+summary_page = st.Page("pages/4_Summary.py", title="Summary", icon="📊")
+add_expense_page = st.Page("pages/1_Add_Expense.py", title="Add Expense", icon="🧾")
+ledger_page = st.Page("pages/2_Ledger.py", title="Ledger", icon="📒")
+update_payment_page = st.Page("pages/3_Update_Payment.py", title="Update Payment", icon="💳")
+logout_page = st.Page(render_logout, title="Log Out", icon="🚪")
 
-with footer_right:
-    st.button("Create Account", type="primary", use_container_width=True)
+if is_logged_in():
+    pages = [
+        home_page,
+        summary_page,
+        add_expense_page,
+        ledger_page,
+        update_payment_page,
+        logout_page,
+    ]
+    nav_position = "sidebar"
+else:
+    pages = [
+        home_page,
+        login_page,
+        signup_page,
+    ]
+    nav_position = "top"
 
-st.markdown(
-    '<div class="footer-note">© 2026 SharedCare Ledger. Professional expense tracking for modern co-parenting.</div>',
-    unsafe_allow_html=True,
-)
+pg = st.navigation(pages, position=nav_position)
+pg.run()

@@ -63,11 +63,9 @@ if submitted:
             signup_link = f"http://localhost:8501/Sign_Up?invite={token}"
 
             st.success("Invite created.")
-            st.write("Share this sign-up link with the invited user:")
-            st.code(signup_link)
-
-            st.write("Or share this invite code:")
+            st.write("Share this invite code with the invited user:")
             st.code(token)
+            st.caption("They should open the Sign Up page and paste this code.")
 
         except ValueError as exc:
             st.error(str(exc))

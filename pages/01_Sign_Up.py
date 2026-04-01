@@ -150,7 +150,7 @@ if submitted:
             success, error_message = login_user(normalized_email, password)
 
             if success:
-                st.switch_page("Home.py")
+                st.rerun()
             else:
                 st.warning("Account was created, but automatic login failed.")
                 st.info(error_message)

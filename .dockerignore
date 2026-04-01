@@ -1,0 +1,7 @@
+.venv
+__pycache__
+*.pyc
+.git
+.streamlit/secrets.toml
+database/*.db-wal
+database/*.db-shm

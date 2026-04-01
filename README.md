@@ -32,7 +32,7 @@ This project is designed to help co-parents:
    cd coParentExpenses
 
 
-   app.py
+   Home.py
 Your homepage / landing page.
 
 pages/1_Add_Expense.py

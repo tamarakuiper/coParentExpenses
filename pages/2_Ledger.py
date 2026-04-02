@@ -282,7 +282,6 @@ for item in filtered:
 
     display_rows.append(
         {
-            "ID": item["id"],
             "Date": item["expense_date"],
             "Child": item["child_name"],
             "Category": item["category"],
@@ -309,7 +308,7 @@ st.caption("You can edit only expenses that you entered.")
 for item in filtered:
     can_edit = item["created_by_user_id"] == current_user["user_id"]
 
-    with st.expander(f"#{item['id']} • {item['expense_date']} • {item['category']} • ${item['amount']:,.2f}"):
+    with st.expander(f"#{item['expense_date']} • {item['category']} • ${item['amount']:,.2f}"):
         left, right = st.columns(2)
 
         with left:

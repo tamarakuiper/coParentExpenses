@@ -45,7 +45,7 @@ def send_household_invite_email(
 
     response = resend.Emails.send(
         {
-            "from": "Co-Parent Expenses <onboarding@resend.dev>",
+            "from": "Co-Parent Expenses <tkuiper2024@gmail.com>",
             "to": [to_email],
             "subject": subject,
             "html": html,

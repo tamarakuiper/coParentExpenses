@@ -39,7 +39,8 @@ st.title("✉️ Invite User")
 st.write("Invite another user to join your household.")
 
 st.caption(
-    f"Signed in as {current_user['user_name']} • Household: {current_user.get('household_name', 'Unknown Household')}"
+    f"Signed in as {current_user['user_name']} • Household: "
+    f"{current_user.get('household_name', 'Unknown Household')}"
 )
 
 with st.form("invite_user_form"):
@@ -64,7 +65,7 @@ if submitted:
             household_name = current_user.get("household_name", "your household")
             inviter_name = current_user.get("user_name", "A user")
 
-            send_household_invite_email(
+            email_result = send_household_invite_email(
                 to_email=normalized_invited_email,
                 inviter_name=inviter_name,
                 household_name=household_name,

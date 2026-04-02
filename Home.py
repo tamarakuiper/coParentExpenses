@@ -33,6 +33,44 @@ def get_current_user_email(user_id: int):
         return row["email"]
     except Exception:
         return row[0]
+    
+
+    
+def get_payment_profile(user_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT venmo_handle, zelle_email, zelle_phone
+        FROM users
+        WHERE id = ?
+        LIMIT 1
+        """,
+        (user_id,),
+    )
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row:
+        return {
+            "venmo_handle": "",
+            "zelle_email": "",
+            "zelle_phone": "",
+        }
+
+    try:
+        return {
+            "venmo_handle": row["venmo_handle"] or "",
+            "zelle_email": row["zelle_email"] or "",
+            "zelle_phone": row["zelle_phone"] or "",
+        }
+    except Exception:
+        return {
+            "venmo_handle": row[0] or "",
+            "zelle_email": row[1] or "",
+            "zelle_phone": row[2] or "",
+        }
+    
 
 
 def render_logged_out_home():
@@ -51,6 +89,21 @@ def render_logged_in_home():
     st.info(f"Household: {current_user['household_name']}")
 
     st.write("Use the menu on the left to manage your household expenses.")
+
+    ## Payment profile
+    payment_profile = get_payment_profile(current_user["user_id"])
+
+    has_payment_details = any([
+        payment_profile["venmo_handle"].strip(),
+        payment_profile["zelle_email"].strip(),
+        payment_profile["zelle_phone"].strip(),
+    ])
+
+    if not has_payment_details:
+        st.warning(
+            "You have not added any payment details yet. Add your Venmo or Zelle info in Profile so other household members know how to reimburse you."
+        )
+        st.page_link("pages/9_Profile.py", label="Go to Profile", icon="👤")
 
     st.markdown("---")
     st.subheader("Invite another user")
@@ -169,6 +222,7 @@ def render_logout():
 
 
 home_page = st.Page(render_home, title="Home", icon="🏠", default=True)
+profile_page = st.Page("pages/9_Profile.py", title="Profile", icon="👤")
 
 login_page = st.Page("pages/02_Log_In.py", title="Login", icon="🔐")
 signup_page = st.Page("pages/01_Sign_Up.py", title="Signup", icon="🆕")
@@ -179,6 +233,7 @@ ledger_page = st.Page("pages/2_Ledger.py", title="Ledger", icon="📒")
 update_payment_page = st.Page("pages/3_Update_Payment.py", title="Update Payment", icon="💳")
 logout_page = st.Page(render_logout, title="Log Out", icon="🚪")
 
+
 if is_logged_in():
     pages = [
         home_page,
@@ -186,6 +241,7 @@ if is_logged_in():
         add_expense_page,
         ledger_page,
         update_payment_page,
+        profile_page,
         logout_page,
     ]
     nav_position = "sidebar"

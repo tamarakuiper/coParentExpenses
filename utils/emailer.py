@@ -1,7 +1,13 @@
 import os
-from resend import Resend
+import resend
 
-def send_household_invite_email(to_email: str, household_name: str, inviter_name: str, token: str):
+
+def send_household_invite_email(
+    to_email: str,
+    household_name: str,
+    inviter_name: str,
+    token: str,
+):
     api_key = os.getenv("RESEND_API_KEY")
     base_url = os.getenv("APP_BASE_URL", "").rstrip("/")
 
@@ -11,7 +17,7 @@ def send_household_invite_email(to_email: str, household_name: str, inviter_name
     if not base_url:
         raise ValueError("APP_BASE_URL is not set")
 
-    resend = Resend(api_key=api_key)
+    resend.api_key = api_key
 
     invite_link = f"{base_url}/Sign_Up?invite={token}"
 
@@ -32,14 +38,18 @@ def send_household_invite_email(to_email: str, household_name: str, inviter_name
 
         <p>Or copy and paste this link into your browser:</p>
         <p>{invite_link}</p>
+
+        <p>Invite code: <strong>{token}</strong></p>
     </div>
     """
 
-    response = resend.emails.send({
-        "from": "Co-Parent Expenses <onboarding@resend.dev>",
-        "to": [to_email],
-        "subject": subject,
-        "html": html,
-    })
+    response = resend.Emails.send(
+        {
+            "from": "Co-Parent Expenses <onboarding@resend.dev>",
+            "to": [to_email],
+            "subject": subject,
+            "html": html,
+        }
+    )
 
     return response

@@ -4,6 +4,7 @@ from utils.auth import is_logged_in, get_current_user, logout_user, require_logi
 from utils.db import get_connection
 from utils.invites import create_household_invite
 from utils.household_admin import fetch_household_members, remove_household_member
+from utils.emailer import send_household_invite_email
 import os
 
 BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8501")
@@ -128,23 +129,23 @@ def render_logged_in_home():
             else:
                 try:
                     token = create_household_invite(
-                        invited_email=invited_email,
+                        invited_email=normalized_invited_email,
                         invited_by_user_id=current_user["user_id"],
                     )
 
-                    signup_link = f"{BASE_URL}/Sign_Up?invite={token}"
+                    send_household_invite_email(
+                        to_email=normalized_invited_email,
+                        inviter_name=current_user["user_name"],
+                        household_name=current_user.get("household_name", "your household"),
+                        token=token,
+                    )
 
-                    st.success("Invite created.")
-                    st.write("Share this sign-up link:")
-                    st.code(signup_link)
-
-                    st.write("Or share this invite code:")
-                    st.code(token)
+                    st.success(f"Invite emailed to {normalized_invited_email}.")
 
                 except ValueError as exc:
                     st.error(str(exc))
                 except Exception as exc:
-                    st.error(f"Something went wrong while creating the invite: {exc}")
+                    st.error(f"Something went wrong while creating or sending the invite: {exc}")
 
         st.markdown("---")
         st.subheader("Manage household")

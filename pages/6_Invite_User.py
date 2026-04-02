@@ -3,6 +3,7 @@ import streamlit as st
 from utils.auth import require_login
 from utils.db import get_connection
 from utils.invites import create_household_invite
+from utils.emailer import send_household_invite_email
 
 st.set_page_config(page_title="Invite User", page_icon="✉️", layout="wide")
 
@@ -43,7 +44,7 @@ st.caption(
 
 with st.form("invite_user_form"):
     invited_email = st.text_input("Invitee Email", placeholder="name@example.com")
-    submitted = st.form_submit_button("Create Invite", type="primary")
+    submitted = st.form_submit_button("Send Invite", type="primary")
 
 if submitted:
     normalized_invited_email = invited_email.strip().lower()
@@ -56,18 +57,23 @@ if submitted:
     else:
         try:
             token = create_household_invite(
-                invited_email=invited_email,
+                invited_email=normalized_invited_email,
                 invited_by_user_id=current_user["user_id"],
             )
 
-            signup_link = f"http://localhost:8501/Sign_Up?invite={token}"
+            household_name = current_user.get("household_name", "your household")
+            inviter_name = current_user.get("user_name", "A user")
 
-            st.success("Invite created.")
-            st.write("Share this invite code with the invited user:")
-            st.code(token)
-            st.caption("They should open the Sign Up page and paste this code.")
+            send_household_invite_email(
+                to_email=normalized_invited_email,
+                inviter_name=inviter_name,
+                household_name=household_name,
+                token=token,
+            )
+
+            st.success(f"Invite sent to {normalized_invited_email}")
 
         except ValueError as exc:
             st.error(str(exc))
         except Exception as exc:
-            st.error(f"Something went wrong while creating the invite: {exc}")
+            st.error(f"Something went wrong while creating or sending the invite: {exc}")

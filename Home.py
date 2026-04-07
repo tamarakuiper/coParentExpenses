@@ -5,6 +5,7 @@ from utils.db import get_connection
 from utils.invites import create_household_invite
 from utils.household_admin import fetch_household_members, remove_household_member
 from utils.emailer import send_household_invite_email
+from datetime import datetime
 import os
 
 BASE_URL = os.getenv("APP_BASE_URL", "http://localhost:8501")
@@ -75,6 +76,43 @@ def get_payment_profile(user_id: int):
             "zelle_email": row[1] or "",
             "zelle_phone": row[2] or "",
         }
+
+
+def get_household_members_with_last_login(household_id: int):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT
+            hm.user_id,
+            hm.role,
+            hm.joined_at,
+            u.full_name,
+            u.email,
+            u.last_login_at
+        FROM household_members hm
+        JOIN users u
+            ON u.id = hm.user_id
+        WHERE hm.household_id = ?
+        ORDER BY
+            CASE WHEN hm.role = 'owner' THEN 0 ELSE 1 END,
+            u.full_name ASC
+        """,
+        (household_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
+def format_last_login(value):
+    if not value:
+        return "Never"
+
+    try:
+        return datetime.strptime(value, "%Y-%m-%d %H:%M:%S").strftime("%b %d, %Y %I:%M %p")
+    except Exception:
+        return str(value)
 
 
 def render_logged_out_home():
@@ -150,7 +188,7 @@ def render_logged_in_home():
         st.markdown("---")
         st.subheader("Manage household")
 
-        members = fetch_household_members(current_user["household_id"])
+        members = get_household_members_with_last_login(current_user["household_id"])
 
         removable_members = []
         for member in members:
@@ -159,20 +197,23 @@ def render_logged_in_home():
                 member_name = member["full_name"]
                 member_email = member["email"]
                 member_role = member["role"]
+                member_last_login = member["last_login_at"]
             except Exception:
                 member_user_id = member[0]
                 member_role = member[1]
                 member_name = member[3]
                 member_email = member[4]
+                member_last_login = member[5]
 
-            label = f"{member_name} ({member_email}) — {member_role}"
+            formatted_last_login = format_last_login(member_last_login)
+            label = f"{member_name} ({member_email}) — {member_role} • Last login: {formatted_last_login}"
             st.write(label)
 
             if member_user_id != current_user["user_id"] and member_role != "owner":
                 removable_members.append(
                     {
                         "user_id": member_user_id,
-                        "label": label,
+                        "label": f"{member_name} ({member_email}) — {member_role}",
                     }
                 )
 

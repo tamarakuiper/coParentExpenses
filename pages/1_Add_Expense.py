@@ -6,6 +6,7 @@ import streamlit as st
 
 from utils.auth import require_login
 from utils.db import get_connection
+from utils.household_admin import fetch_household_members
 
 st.set_page_config(page_title="Add Expense", page_icon="🧾", layout="wide")
 
@@ -38,29 +39,6 @@ def save_receipt(uploaded_file):
         file_handle.write(uploaded_file.getbuffer())
 
     return str(file_path).replace("\\", "/")
-
-
-def fetch_household_members(household_id):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        SELECT
-            u.id,
-            u.full_name,
-            u.email,
-            hm.role
-        FROM household_members hm
-        JOIN users u
-            ON u.id = hm.user_id
-        WHERE hm.household_id = ?
-        ORDER BY u.full_name ASC, u.email ASC
-        """,
-        (household_id,),
-    )
-    rows = cursor.fetchall()
-    conn.close()
-    return rows
 
 
 def insert_expense(
@@ -142,7 +120,10 @@ if not household_id:
     st.error("Your account is not linked to a household yet.")
     st.stop()
 
-members = fetch_household_members(household_id)
+members = fetch_household_members(
+    household_id,
+    current_user["user_id"],
+)
 
 if not members:
     st.error("No household members were found for your account.")
@@ -150,7 +131,7 @@ if not members:
 
 member_options = {
     f"{member['full_name']} ({member['email']})": {
-        "id": member["id"],
+        "id": member["user_id"],
         "name": member["full_name"],
         "email": member["email"],
         "role": member["role"],

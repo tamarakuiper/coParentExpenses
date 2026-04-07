@@ -178,6 +178,30 @@ def update_expense(
     return changed > 0
 
 
+def delete_expense(expense_id, household_id, current_user_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        DELETE FROM expenses
+        WHERE id = ?
+          AND household_id = ?
+          AND created_by_user_id = ?
+        """,
+        (
+            expense_id,
+            household_id,
+            current_user_id,
+        ),
+    )
+
+    changed = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return changed > 0
+
+
 st.title("📒 Expense Ledger")
 st.write("View all shared expenses, payment status, and outstanding balances.")
 
@@ -304,7 +328,7 @@ st.subheader("Expenses")
 st.dataframe(display_rows, use_container_width=True)
 
 st.subheader("Expense Receipts")
-st.caption("You can edit only expenses that you entered.")
+st.caption("You can edit or delete only expenses that you entered.")
 
 for item in filtered:
     can_edit = item["created_by_user_id"] == current_user["user_id"]
@@ -331,7 +355,7 @@ for item in filtered:
         render_receipt(item["receipt_path"], key_prefix=f"ledger_{item['id']}")
 
         if not can_edit:
-            st.info("Only the person who entered this expense can edit it.")
+            st.info("Only the person who entered this expense can edit or delete it.")
             continue
 
         st.markdown("---")
@@ -466,3 +490,26 @@ for item in filtered:
                     st.rerun()
                 else:
                     st.error("You can only edit expenses that you entered.")
+
+        st.markdown("---")
+        st.markdown("### Delete Expense")
+        confirm_delete = st.checkbox(
+            "I understand this will permanently delete this expense.",
+            key=f"confirm_delete_{item['id']}",
+        )
+
+        if st.button("Delete Expense", key=f"delete_{item['id']}"):
+            if not confirm_delete:
+                st.error("Please confirm deletion first.")
+            else:
+                ok = delete_expense(
+                    expense_id=item["id"],
+                    household_id=current_user["household_id"],
+                    current_user_id=current_user["user_id"],
+                )
+
+                if ok:
+                    st.success("Expense deleted successfully.")
+                    st.rerun()
+                else:
+                    st.error("You can only delete expenses that you entered.")

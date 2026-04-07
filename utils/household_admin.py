@@ -19,28 +19,84 @@ def _get(row, key, index=None, default=None):
     return default
 
 
-def fetch_household_members(household_id):
+def get_user_household_role(household_id, user_id):
     conn = get_connection()
     cursor = conn.cursor()
 
     cursor.execute(
         """
-        SELECT
-            hm.user_id,
-            hm.role,
-            hm.joined_at,
-            u.full_name,
-            u.email
-        FROM household_members hm
-        JOIN users u
-            ON u.id = hm.user_id
-        WHERE hm.household_id = ?
-        ORDER BY
-            CASE WHEN hm.role = 'owner' THEN 0 ELSE 1 END,
-            u.full_name ASC
+        SELECT role
+        FROM household_members
+        WHERE household_id = ?
+          AND user_id = ?
+        LIMIT 1
         """,
-        (household_id,),
+        (household_id, user_id),
     )
+
+    row = cursor.fetchone()
+    conn.close()
+    return _get(row, "role", 0)
+
+
+def fetch_household_members(household_id, viewer_user_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT role
+        FROM household_members
+        WHERE household_id = ?
+          AND user_id = ?
+        LIMIT 1
+        """,
+        (household_id, viewer_user_id),
+    )
+    viewer_membership = cursor.fetchone()
+
+    viewer_role = _get(viewer_membership, "role", 0)
+    if not viewer_role:
+        conn.close()
+        return []
+
+    if viewer_role == "owner":
+        cursor.execute(
+            """
+            SELECT
+                hm.user_id,
+                hm.role,
+                hm.joined_at,
+                u.full_name,
+                u.email
+            FROM household_members hm
+            JOIN users u
+                ON u.id = hm.user_id
+            WHERE hm.household_id = ?
+            ORDER BY
+                CASE WHEN hm.role = 'owner' THEN 0 ELSE 1 END,
+                u.full_name ASC
+            """,
+            (household_id,),
+        )
+    else:
+        cursor.execute(
+            """
+            SELECT
+                hm.user_id,
+                hm.role,
+                hm.joined_at,
+                u.full_name,
+                u.email
+            FROM household_members hm
+            JOIN users u
+                ON u.id = hm.user_id
+            WHERE hm.household_id = ?
+              AND hm.role = 'owner'
+            ORDER BY u.full_name ASC
+            """,
+            (household_id,),
+        )
 
     rows = cursor.fetchall()
     conn.close()

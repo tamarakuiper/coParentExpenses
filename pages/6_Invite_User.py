@@ -9,6 +9,10 @@ st.set_page_config(page_title="Invite User", page_icon="✉️", layout="wide")
 
 current_user = require_login()
 
+if current_user.get("role") != "owner":
+    st.error("Only the household owner can invite users.")
+    st.stop()
+
 
 def get_current_user_email(user_id: int):
     conn = get_connection()
@@ -65,7 +69,7 @@ if submitted:
             household_name = current_user.get("household_name", "your household")
             inviter_name = current_user.get("user_name", "A user")
 
-            email_result = send_household_invite_email(
+            send_household_invite_email(
                 to_email=normalized_invited_email,
                 inviter_name=inviter_name,
                 household_name=household_name,

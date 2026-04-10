@@ -64,6 +64,7 @@ def insert_expense(
 ):
     conn = get_connection()
     cursor = conn.cursor()
+
     cursor.execute(
         """
         INSERT INTO expenses (
@@ -111,6 +112,7 @@ def insert_expense(
             notes,
         ),
     )
+
     conn.commit()
     conn.close()
 
@@ -120,10 +122,7 @@ if not household_id:
     st.error("Your account is not linked to a household yet.")
     st.stop()
 
-members = fetch_household_members(
-    household_id,
-    current_user["user_id"],
-)
+members = fetch_household_members(household_id, current_user["user_id"])
 
 if not members:
     st.error("No household members were found for your account.")

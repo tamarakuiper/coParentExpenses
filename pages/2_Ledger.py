@@ -7,6 +7,7 @@ import streamlit as st
 from utils.db import get_connection
 from utils.receipt_utils import render_receipt
 from utils.auth import require_login
+from utils.payments import fetch_payments_by_expense
 
 st.set_page_config(page_title="Ledger", page_icon="📒", layout="wide")
 
@@ -203,10 +204,9 @@ def delete_expense(expense_id, household_id, current_user_id):
 
 
 st.title("📒 Expense Ledger")
-st.write("View all shared expenses, payment status, and outstanding balances.")
+st.write("View shared expenses, receipts, payments, and outstanding balances.")
 
 members = fetch_household_members(current_user["household_id"])
-
 if not members:
     st.error("No household members found.")
     st.stop()
@@ -223,6 +223,7 @@ member_options = {
 member_labels = list(member_options.keys())
 
 rows = fetch_expenses(current_user["household_id"])
+payments_by_expense = fetch_payments_by_expense(current_user["household_id"])
 
 if not rows:
     st.info("No expenses saved yet. Go to Add Expense and create your first entry.")
@@ -259,6 +260,7 @@ for row in rows:
             "receipt_path": row["receipt_path"] or "",
             "notes": row["notes"] or "",
             "created_at": row["created_at"] or "",
+            "payments": payments_by_expense.get(row["id"], []),
         }
     )
 
@@ -302,11 +304,10 @@ if not filtered:
 display_rows = []
 for item in filtered:
     receipt_name = Path(item["receipt_path"]).name if item["receipt_path"] else ""
-    receipt_status = "View below" if item["receipt_path"] else "No receipt"
+    receipt_display = receipt_name if receipt_name else "-"
 
     display_rows.append(
         {
-            "ID": item["id"],
             "Date": item["expense_date"],
             "Child": item["child_name"],
             "Category": item["category"],
@@ -318,43 +319,75 @@ for item in filtered:
             "Amount Paid": f"${item['amount_paid']:,.2f}",
             "Outstanding": f"${item['outstanding']:,.2f}",
             "Status": item["status"],
-            "Receipt": receipt_status,
+            "Receipt": receipt_display,
             "Entered By You": "Yes" if item["created_by_user_id"] == current_user["user_id"] else "No",
-            "Receipt File": receipt_name,
         }
     )
 
 st.subheader("Expenses")
-st.dataframe(display_rows, use_container_width=True)
+st.dataframe(display_rows, use_container_width=True, hide_index=True)
 
-st.subheader("Expense Receipts")
 st.caption("You can edit or delete only expenses that you entered.")
 
 for item in filtered:
     can_edit = item["created_by_user_id"] == current_user["user_id"]
 
-    with st.expander(f"#{item['id']} • {item['expense_date']} • {item['category']} • ${item['amount']:,.2f}"):
-        left, right = st.columns(2)
+    expander_title = (
+        f"#{item['id']} • {item['expense_date']} • {item['category']} • "
+        f"${item['amount']:,.2f} • Outstanding ${item['outstanding']:,.2f}"
+    )
 
-        with left:
-            st.write(f"**Child:** {item['child_name']}")
+    with st.expander(expander_title):
+        top_left, top_right = st.columns(2)
+
+        with top_left:
+            st.write(f"**Child:** {item['child_name'] or '-'}")
+            st.write(f"**Category:** {item['category'] or '-'}")
             st.write(f"**Description:** {item['description'] or '-'}")
-            st.write(f"**Paid By:** {item['paid_by']}")
-            st.write(f"**Owed By:** {item['owed_by']}")
-            st.write(f"**Status:** {item['status']}")
-            st.write(f"**Entered By You:** {'Yes' if can_edit else 'No'}")
+            st.write(f"**Paid By:** {item['paid_by'] or '-'}")
+            st.write(f"**Owed By:** {item['owed_by'] or '-'}")
+            st.write(f"**Status:** {item['status'] or '-'}")
 
-        with right:
+        with top_right:
             st.write(f"**Total Amount:** ${item['amount']:,.2f}")
             st.write(f"**Amount Owed:** ${item['amount_owed']:,.2f}")
             st.write(f"**Amount Paid:** ${item['amount_paid']:,.2f}")
             st.write(f"**Outstanding:** ${item['outstanding']:,.2f}")
             st.write(f"**Split:** {item['split_value']:,.2f}%")
+            st.write(f"**Entered By You:** {'Yes' if can_edit else 'No'}")
 
         st.write(f"**Notes:** {item['notes'] or '-'}")
-        render_receipt(item["receipt_path"], key_prefix=f"ledger_{item['id']}")
+
+        if item["receipt_path"]:
+            st.write("**Receipt:**")
+            render_receipt(item["receipt_path"], key_prefix=f"ledger_{item['id']}")
+        else:
+            st.write("**Receipt:** -")
+
+        st.markdown("---")
+        st.markdown("### Payment History")
+
+        if item["payments"]:
+            for payment in item["payments"]:
+                method_display = payment["method"].title() if payment["method"] else "-"
+                st.write(
+                    f"**{payment['paid_at'] or '-'}** — "
+                    f"${payment['amount']:,.2f} via {method_display}"
+                )
+                st.caption(
+                    f"Payer: {payment['payer_name'] or '-'} | "
+                    f"Receiver: {payment['receiver_name'] or '-'}"
+                )
+                if payment["external_reference"]:
+                    st.caption(f"Reference: {payment['external_reference']}")
+                if payment["note"]:
+                    st.caption(f"Note: {payment['note']}")
+                st.markdown("")
+        else:
+            st.info("No payments recorded for this expense yet.")
 
         if not can_edit:
+            st.markdown("---")
             st.info("Only the person who entered this expense can edit or delete it.")
             continue
 
@@ -493,6 +526,7 @@ for item in filtered:
 
         st.markdown("---")
         st.markdown("### Delete Expense")
+
         confirm_delete = st.checkbox(
             "I understand this will permanently delete this expense.",
             key=f"confirm_delete_{item['id']}",

@@ -13,16 +13,25 @@ def init_db():
     conn = get_connection()
     cursor = conn.cursor()
 
-    ensure_column(cursor, "users", "last_login_at", "TEXT")
-
-    cursor.execute("PRAGMA table_info(users)")
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS payment_allocations (
+                   id INTEGER PRIMARY KEY AUTOINCREMENT,
+                   payment_id INTEGER NOT NULL,
+                   expense_id INTEGER NOT NULL,
+                   allocated_amount REAL NOT NULL,
+                   created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                   FOREIGN KEY (payment_id) REFERENCES expense_payments(id),
+                   FOREIGN KEY (expense_id) REFERENCES expenses(id)
+                )
+                   
+                   """)
     print([row["name"] for row in cursor.fetchall()])
 
     conn.commit()
     conn.close()
 
     print("Database initialized.")
-    print("Users are ready for last_login_at tracking.")
+    print("Users are ready for payment allocations.")
 
 
 if __name__ == "__main__":

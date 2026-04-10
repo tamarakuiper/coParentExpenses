@@ -1,162 +1,11 @@
 import streamlit as st
-from utils.db import get_connection
+
 from utils.auth import require_login
+from utils.payments import fetch_expenses_user_owes, apply_payment_to_expenses
 
 current_user = require_login()
 
 st.set_page_config(page_title="Update Payment", page_icon="💳", layout="wide")
-
-
-def calculate_status(amount_owed, amount_paid):
-    if amount_paid <= 0:
-        return "outstanding"
-    elif amount_paid < amount_owed:
-        return "partial"
-    return "paid"
-
-
-def fetch_expenses_user_owes(household_id, user_id):
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        SELECT
-            e.id,
-            e.child_name,
-            e.category,
-            e.description,
-            e.amount,
-            e.expense_date,
-            e.paid_by,
-            e.owed_by,
-            e.paid_by_user_id,
-            e.owed_by_user_id,
-            e.split_type,
-            e.split_value,
-            e.amount_owed,
-            e.amount_paid,
-            e.status,
-            e.receipt_path,
-            e.notes,
-            e.created_at,
-            u.full_name AS receiver_name,
-            u.venmo_handle,
-            u.zelle_email,
-            u.zelle_phone
-        FROM expenses e
-        LEFT JOIN users u
-            ON u.id = e.paid_by_user_id
-        WHERE e.household_id = ?
-          AND e.owed_by_user_id = ?
-          AND e.amount_owed > e.amount_paid
-        ORDER BY e.expense_date DESC, e.id DESC
-        """,
-        (household_id, user_id),
-    )
-
-    rows = cursor.fetchall()
-    conn.close()
-    return rows
-
-
-def apply_payment(
-    expense_id,
-    household_id,
-    paying_user_id,
-    receiving_user_id,
-    amount,
-    method,
-    external_reference,
-    note,
-    paid_at,
-):
-    conn = get_connection()
-    cursor = conn.cursor()
-
-    cursor.execute(
-        """
-        SELECT amount_owed, amount_paid
-        FROM expenses
-        WHERE id = ?
-          AND household_id = ?
-          AND owed_by_user_id = ?
-        LIMIT 1
-        """,
-        (expense_id, household_id, paying_user_id),
-    )
-    row = cursor.fetchone()
-
-    if not row:
-        conn.close()
-        return False, "Expense not found or you are not allowed to update it."
-
-    amount_owed = float(row["amount_owed"] or 0)
-    current_amount_paid = float(row["amount_paid"] or 0)
-    new_amount_paid = round(current_amount_paid + amount, 2)
-
-    if new_amount_paid > amount_owed:
-        conn.close()
-        return False, "Payment exceeds the outstanding amount."
-
-    new_status = calculate_status(amount_owed, new_amount_paid)
-
-    cursor.execute(
-        """
-        INSERT INTO expense_payments (
-            expense_id,
-            household_id,
-            paid_by_user_id,
-            received_by_user_id,
-            method,
-            amount,
-            external_reference,
-            note,
-            paid_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            expense_id,
-            household_id,
-            paying_user_id,
-            receiving_user_id,
-            method,
-            amount,
-            external_reference,
-            note,
-            paid_at,
-        ),
-    )
-
-    cursor.execute(
-        """
-        UPDATE expenses
-        SET amount_paid = ?, status = ?, updated_by_user_id = ?
-        WHERE id = ?
-          AND household_id = ?
-          AND owed_by_user_id = ?
-        """,
-        (
-            new_amount_paid,
-            new_status,
-            paying_user_id,
-            expense_id,
-            household_id,
-            paying_user_id,
-        ),
-    )
-
-    conn.commit()
-    conn.close()
-
-    outstanding = round(amount_owed - new_amount_paid, 2)
-    return True, {
-        "amount_paid": new_amount_paid,
-        "status": new_status,
-        "outstanding": outstanding,
-    }
-
 
 st.title("💳 Update Payment")
 st.write("Record a reimbursement payment for expenses you owe.")
@@ -178,7 +27,6 @@ for row in rows:
     amount = float(row["amount"] or 0)
     expense_date = row["expense_date"]
     paid_by = row["paid_by"] or ""
-    owed_by = row["owed_by"] or ""
     amount_owed = float(row["amount_owed"] or 0)
     amount_paid = float(row["amount_paid"] or 0)
     status = row["status"] or ""
@@ -198,7 +46,6 @@ for row in rows:
         "amount": amount,
         "expense_date": expense_date,
         "paid_by": paid_by,
-        "owed_by": owed_by,
         "paid_by_user_id": row["paid_by_user_id"],
         "owed_by_user_id": row["owed_by_user_id"],
         "amount_owed": amount_owed,
@@ -211,26 +58,49 @@ for row in rows:
         "zelle_phone": row["zelle_phone"] or "",
     }
 
-selected_label = st.selectbox("Select Expense", expense_options)
-selected = expense_lookup[selected_label]
+selected_labels = st.multiselect(
+    "Select Expenses",
+    options=expense_options,
+    default=[],
+)
 
-left, right = st.columns(2)
+selected_expenses = [expense_lookup[label] for label in selected_labels]
 
-with left:
-    st.write(f"**Child:** {selected['child_name']}")
-    st.write(f"**Category:** {selected['category']}")
-    st.write(f"**Description:** {selected['description'] or '-'}")
-    st.write(f"**Expense Date:** {selected['expense_date']}")
-    st.write(f"**You Owe:** {selected['paid_by']}")
-    st.write(f"**Current Status:** {selected['status']}")
+if "payment_success_message" in st.session_state:
+    st.success(st.session_state.pop("payment_success_message"))
 
-with right:
-    st.write(f"**Total Expense:** ${selected['amount']:,.2f}")
-    st.write(f"**Amount Owed:** ${selected['amount_owed']:,.2f}")
-    st.write(f"**Amount Paid So Far:** ${selected['amount_paid']:,.2f}")
-    st.write(f"**Outstanding Balance:** ${selected['outstanding']:,.2f}")
+if selected_expenses:
+    st.subheader("Selected Expenses")
 
-st.divider()
+    total_selected_outstanding = 0.0
+
+    for selected in selected_expenses:
+        total_selected_outstanding += selected["outstanding"]
+
+        with st.container():
+            left, right = st.columns(2)
+
+            with left:
+                st.write(f"**Expense ID:** {selected['id']}")
+                st.write(f"**Child:** {selected['child_name'] or '-'}")
+                st.write(f"**Category:** {selected['category'] or '-'}")
+                st.write(f"**Description:** {selected['description'] or '-'}")
+                st.write(f"**Expense Date:** {selected['expense_date']}")
+                st.write(f"**You Owe:** {selected['paid_by']}")
+                st.write(f"**Current Status:** {selected['status']}")
+
+            with right:
+                st.write(f"**Total Expense:** ${selected['amount']:,.2f}")
+                st.write(f"**Amount Owed:** ${selected['amount_owed']:,.2f}")
+                st.write(f"**Amount Paid So Far:** ${selected['amount_paid']:,.2f}")
+                st.write(f"**Outstanding Balance:** ${selected['outstanding']:,.2f}")
+
+            st.divider()
+
+    st.info(f"Total outstanding across selected expenses: ${total_selected_outstanding:,.2f}")
+else:
+    st.info("Select one or more expenses to apply a payment.")
+
 st.subheader("Payment Details")
 
 payment_method = st.selectbox(
@@ -238,27 +108,46 @@ payment_method = st.selectbox(
     ["Venmo", "Zelle", "Cash", "Check", "Other"],
 )
 
-if payment_method == "Venmo":
-    if selected["venmo_handle"]:
-        st.info(f"Send Venmo payment to **{selected['receiver_name']}** at **{selected['venmo_handle']}**")
-    else:
-        st.warning("This user has not added a Venmo handle yet.")
-elif payment_method == "Zelle":
-    zelle_targets = []
-    if selected["zelle_email"]:
-        zelle_targets.append(f"Email: {selected['zelle_email']}")
-    if selected["zelle_phone"]:
-        zelle_targets.append(f"Phone: {selected['zelle_phone']}")
+if selected_expenses:
+    receiver_ids = {expense["paid_by_user_id"] for expense in selected_expenses}
 
-    if zelle_targets:
-        st.info(f"Send Zelle payment to **{selected['receiver_name']}** via " + " | ".join(zelle_targets))
+    if len(receiver_ids) == 1:
+        first_selected = selected_expenses[0]
+
+        if payment_method == "Venmo":
+            if first_selected["venmo_handle"]:
+                st.info(
+                    f"Send Venmo payment to **{first_selected['receiver_name']}** "
+                    f"at **{first_selected['venmo_handle']}**"
+                )
+            else:
+                st.warning("This user has not added a Venmo handle yet.")
+
+        elif payment_method == "Zelle":
+            zelle_targets = []
+            if first_selected["zelle_email"]:
+                zelle_targets.append(f"Email: {first_selected['zelle_email']}")
+            if first_selected["zelle_phone"]:
+                zelle_targets.append(f"Phone: {first_selected['zelle_phone']}")
+
+            if zelle_targets:
+                st.info(
+                    f"Send Zelle payment to **{first_selected['receiver_name']}** via "
+                    + " | ".join(zelle_targets)
+                )
+            else:
+                st.warning("This user has not added Zelle details yet.")
     else:
-        st.warning("This user has not added Zelle details yet.")
+        st.warning(
+            "You selected expenses owed to different users. Payment instructions may differ by expense."
+        )
+
+max_payment = round(sum(expense["outstanding"] for expense in selected_expenses), 2) if selected_expenses else 0.0
 
 payment_amount = st.number_input(
     "Payment Amount",
     min_value=0.0,
-    max_value=float(selected["outstanding"]) if selected["outstanding"] > 0 else 0.0,
+    max_value=max_payment if max_payment > 0 else 0.0,
     value=0.0,
     format="%.2f",
 )
@@ -276,17 +165,16 @@ payment_note = st.text_area(
 paid_at = st.date_input("Payment Date")
 
 if st.button("Record Payment", type="primary"):
-    if selected["outstanding"] <= 0:
-        st.warning("This expense is already fully paid.")
+    if not selected_expenses:
+        st.error("Select at least one expense.")
     elif payment_amount <= 0:
         st.error("Enter a payment amount greater than 0.")
     else:
-        ok, result = apply_payment(
-            expense_id=selected["id"],
+        ok, result = apply_payment_to_expenses(
             household_id=current_user["household_id"],
             paying_user_id=current_user["user_id"],
-            receiving_user_id=selected["paid_by_user_id"],
-            amount=round(payment_amount, 2),
+            selected_expenses=selected_expenses,
+            total_payment_amount=round(payment_amount, 2),
             method=payment_method.lower(),
             external_reference=external_reference.strip(),
             note=payment_note.strip(),
@@ -294,12 +182,28 @@ if st.button("Record Payment", type="primary"):
         )
 
         if ok:
-            st.success("Payment recorded successfully.")
-            st.info(
-                f"New amount paid: ${result['amount_paid']:,.2f} | "
-                f"Outstanding balance: ${result['outstanding']:,.2f} | "
-                f"Status: {result['status']}"
-            )
+            st.session_state["payment_success_message"] = "Payment recorded successfully."
+            st.rerun()
+            st.write(f"**Total Applied:** ${result['total_applied']:,.2f}")
+
+            if result["unapplied_amount"] > 0:
+                st.warning(
+                    f"${result['unapplied_amount']:,.2f} could not be applied because the selected "
+                    f"expenses were fully covered."
+                )
+
+            st.subheader("Applied To")
+            for item in result["allocations"]:
+                st.write(
+                    f"Expense #{item['expense_id']} | "
+                    f"{item['expense_date']} | "
+                    f"{item['child_name']} | "
+                    f"{item['description'] or '-'} | "
+                    f"Applied: ${item['applied_amount']:,.2f} | "
+                    f"Remaining: ${item['remaining_outstanding']:,.2f} | "
+                    f"Status: {item['new_status']}"
+                )
+
             st.rerun()
         else:
             st.error(result)

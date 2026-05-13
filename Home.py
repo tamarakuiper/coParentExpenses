@@ -1,6 +1,6 @@
 import streamlit as st
 
-from utils.auth import is_logged_in, get_current_user, logout_user, require_login
+from utils.auth import is_logged_in, get_current_user, logout_user, require_login, login_user
 from utils.db import get_connection
 from utils.invites import create_household_invite
 from utils.household_admin import fetch_household_members, remove_household_member
@@ -123,11 +123,202 @@ def format_last_login(value):
 
 
 def render_logged_out_home():
-    st.title("🏠 Co-Parent Shared Expenses")
-    st.write("Track shared child-related expenses in one place.")
-    st.write("Please log in or sign up to continue.")
-    st.caption("If you were invited, use the Sign Up page and enter your invite code there.")
+    st.markdown(
+        """
+        <style>
+            .stApp {
+                background:
+                    radial-gradient(circle at 20% 10%, rgba(37, 99, 235, 0.16), transparent 28%),
+                    radial-gradient(circle at 80% 85%, rgba(20, 184, 166, 0.13), transparent 28%),
+                    linear-gradient(135deg, #f8fbff 0%, #eef5ff 48%, #f8fafc 100%);
+            }
 
+            header[data-testid="stHeader"] {
+                background: rgba(255,255,255,0.72);
+                backdrop-filter: blur(10px);
+                -webkit-backdrop-filter: blur(10px);
+            }
+
+            .block-container {
+                max-width: 560px !important;
+                padding-top: 13vh !important;
+                padding-bottom: 4rem !important;
+                margin-left: auto !important;
+                margin-right: auto !important;
+            }
+
+            .login-card-top {
+                padding: 2rem 2rem 1.1rem 2rem;
+                border-radius: 30px 30px 0 0;
+                background: rgba(255, 255, 255, 0.90);
+                border-top: 1px solid rgba(148, 163, 184, 0.24);
+                border-left: 1px solid rgba(148, 163, 184, 0.24);
+                border-right: 1px solid rgba(148, 163, 184, 0.24);
+                box-shadow: 0 24px 70px rgba(15, 23, 42, 0.12);
+                backdrop-filter: blur(14px);
+                -webkit-backdrop-filter: blur(14px);
+            }
+
+            .login-badge {
+                width: 54px;
+                height: 54px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                margin: 0 auto 1rem auto;
+                border-radius: 18px;
+                background: linear-gradient(135deg, #2563eb 0%, #14b8a6 100%);
+                color: white;
+                font-size: 1.7rem;
+                box-shadow: 0 14px 26px rgba(37, 99, 235, 0.22);
+            }
+
+            .login-title {
+                margin: 0;
+                text-align: center;
+                color: #0f172a;
+                font-size: 2rem;
+                line-height: 1.15;
+                font-weight: 800;
+                letter-spacing: -0.04em;
+            }
+
+            .login-subtitle {
+                margin: 0.55rem auto 0 auto;
+                text-align: center;
+                color: #475569;
+                font-size: 1rem;
+                max-width: 360px;
+            }
+
+            div[data-testid="stForm"] {
+                margin-top: -1px;
+                padding: 0 2rem 1.7rem 2rem;
+                border-radius: 0 0 30px 30px;
+                background: rgba(255, 255, 255, 0.90);
+                border-top: 0;
+                border-left: 1px solid rgba(148, 163, 184, 0.24);
+                border-right: 1px solid rgba(148, 163, 184, 0.24);
+                border-bottom: 1px solid rgba(148, 163, 184, 0.24);
+                box-shadow: 0 24px 70px rgba(15, 23, 42, 0.12);
+                backdrop-filter: blur(14px);
+                -webkit-backdrop-filter: blur(14px);
+            }
+
+            .stTextInput label {
+                color: #334155 !important;
+                font-weight: 700 !important;
+            }
+
+            .stTextInput > div > div {
+                border-radius: 15px !important;
+                border: 1px solid rgba(148, 163, 184, 0.36) !important;
+                background: rgba(255,255,255,0.96) !important;
+                box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
+            }
+
+            .stTextInput > div > div:focus-within {
+                border-color: rgba(37, 99, 235, 0.62) !important;
+                box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.10);
+            }
+
+            .stFormSubmitButton > button {
+                width: 100%;
+                min-height: 3rem;
+                border-radius: 16px !important;
+                border: 0 !important;
+                background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
+                color: white !important;
+                font-weight: 800 !important;
+                box-shadow: 0 16px 30px rgba(37, 99, 235, 0.26);
+                transition: all 0.18s ease-in-out;
+            }
+
+            .stFormSubmitButton > button:hover {
+                transform: translateY(-1px);
+                box-shadow: 0 20px 38px rgba(37, 99, 235, 0.30);
+            }
+
+            div[data-testid="stAlert"] {
+                border-radius: 16px;
+                border: 1px solid rgba(148, 163, 184, 0.22);
+                box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+            }
+
+            .signup-link-card {
+                margin-top: 1rem;
+                padding: 1rem 1.25rem;
+                text-align: center;
+                color: #475569;
+                font-size: 0.96rem;
+                border-radius: 22px;
+                background: rgba(255, 255, 255, 0.74);
+                border: 1px solid rgba(148, 163, 184, 0.20);
+                box-shadow: 0 12px 30px rgba(15, 23, 42, 0.07);
+            }
+
+            .signup-link-card a {
+                color: #1d4ed8;
+                font-weight: 800;
+                text-decoration: none;
+            }
+
+            .signup-link-card a:hover {
+                text-decoration: underline;
+            }
+
+            div[data-testid="stPageLink"] {
+                display: flex;
+                justify-content: center;
+            }
+
+            div[data-testid="stPageLink"] a {
+                justify-content: center;
+                border-radius: 14px;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(
+        """
+        <div class="login-card-top">
+            <div class="login-badge">🏠</div>
+            <h1 class="login-title">Co-Parent Shared Expenses</h1>
+            <p class="login-subtitle">Log in to track expenses, payments, receipts, and household balances in one shared place.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.form("home_log_in_form"):
+        email = st.text_input("Email", placeholder="name@example.com")
+        password = st.text_input("Password", type="password", placeholder="Enter your password")
+        submitted = st.form_submit_button("Log In", type="primary")
+
+    if submitted:
+        if not email.strip():
+            st.error("Email is required.")
+        elif not password:
+            st.error("Password is required.")
+        else:
+            success, error_message = login_user(email.strip().lower(), password)
+            if success:
+                st.rerun()
+            else:
+                st.error(error_message)
+
+    st.markdown(
+        """
+        <div class="signup-link-card">
+            <strong>New to Co-Parent Shared Expenses?</strong>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.page_link("pages/01_Sign_Up.py", label="Create an account", icon="🆕")
+    st.caption("Invited users can sign up with their invite code.")
+    st.markdown("</div>", unsafe_allow_html=True)
 
 def render_logged_in_home():
     current_user = require_login()

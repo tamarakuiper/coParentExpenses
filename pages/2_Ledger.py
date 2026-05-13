@@ -8,10 +8,13 @@ from utils.db import get_connection
 from utils.receipt_utils import render_receipt
 from utils.auth import require_login
 from utils.payments import fetch_payments_by_expense
+from utils.household_config import CHILD_OPTIONS, OTHER_PARTICIPANT_LABEL
+from utils.schema import ensure_expense_schema
 
 st.set_page_config(page_title="Ledger", page_icon="📒", layout="wide")
 
 current_user = require_login()
+ensure_expense_schema()
 
 UPLOAD_DIR = Path("uploads/receipts")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -221,6 +224,7 @@ member_options = {
     for member in members
 }
 member_labels = list(member_options.keys())
+participant_labels = member_labels + [OTHER_PARTICIPANT_LABEL]
 
 rows = fetch_expenses(current_user["household_id"])
 payments_by_expense = fetch_payments_by_expense(current_user["household_id"])
@@ -277,7 +281,7 @@ m4.metric("Outstanding", f"${total_outstanding:,.2f}")
 
 st.divider()
 
-child_options = sorted({item["child_name"] for item in expenses if item["child_name"]})
+child_options = sorted(set(CHILD_OPTIONS) | {item["child_name"] for item in expenses if item["child_name"]})
 category_options = sorted({item["category"] for item in expenses if item["category"]})
 status_options = sorted({item["status"] for item in expenses if item["status"]})
 
@@ -397,11 +401,18 @@ for item in filtered:
         paid_by_default = 0
         owed_by_default = 0
 
-        for idx, label in enumerate(member_labels):
+        for idx, label in enumerate(participant_labels):
+            if label == OTHER_PARTICIPANT_LABEL:
+                continue
             if member_options[label]["id"] == item["paid_by_user_id"]:
                 paid_by_default = idx
             if member_options[label]["id"] == item["owed_by_user_id"]:
                 owed_by_default = idx
+
+        if item["paid_by_user_id"] is None:
+            paid_by_default = participant_labels.index(OTHER_PARTICIPANT_LABEL)
+        if item["owed_by_user_id"] is None:
+            owed_by_default = participant_labels.index(OTHER_PARTICIPANT_LABEL)
 
         try:
             default_category_index = CATEGORIES.index(item["category"])
@@ -417,7 +428,12 @@ for item in filtered:
             c1, c2 = st.columns(2)
 
             with c1:
-                edit_child_name = st.text_input("Child Name", value=item["child_name"])
+                edit_child_name = st.selectbox(
+                    "Child Name",
+                    child_options,
+                    index=child_options.index(item["child_name"]) if item["child_name"] in child_options else 0,
+                    key=f"child_{item['id']}",
+                )
                 edit_category = st.selectbox(
                     "Category",
                     CATEGORIES,
@@ -441,16 +457,32 @@ for item in filtered:
             with c2:
                 edit_paid_by_label = st.selectbox(
                     "Paid By",
-                    member_labels,
+                    participant_labels,
                     index=paid_by_default,
                     key=f"paid_by_{item['id']}",
                 )
                 edit_owed_by_label = st.selectbox(
                     "Owed By",
-                    member_labels,
+                    participant_labels,
                     index=owed_by_default,
                     key=f"owed_by_{item['id']}",
                 )
+                edit_paid_by_external_name = ""
+                if edit_paid_by_label == OTHER_PARTICIPANT_LABEL:
+                    edit_paid_by_external_name = st.text_input(
+                        "Paid By Name",
+                        value=item["paid_by"] if item["paid_by_user_id"] is None else "",
+                        key=f"paid_by_external_{item['id']}",
+                    )
+
+                edit_owed_by_external_name = ""
+                if edit_owed_by_label == OTHER_PARTICIPANT_LABEL:
+                    edit_owed_by_external_name = st.text_input(
+                        "Owed By Name",
+                        value=item["owed_by"] if item["owed_by_user_id"] is None else "",
+                        key=f"owed_by_external_{item['id']}",
+                    )
+
                 edit_split_type = st.selectbox(
                     "Split Type",
                     ["percent"],
@@ -475,11 +507,21 @@ for item in filtered:
             submitted = st.form_submit_button("Save Changes", type="primary")
 
         if submitted:
-            paid_by_member = member_options[edit_paid_by_label]
-            owed_by_member = member_options[edit_owed_by_label]
+            def resolve_participant(label, external_name):
+                if label == OTHER_PARTICIPANT_LABEL:
+                    name = (external_name or "").strip()
+                    return {"id": None, "name": name}
+                return member_options[label]
+
+            paid_by_member = resolve_participant(edit_paid_by_label, edit_paid_by_external_name)
+            owed_by_member = resolve_participant(edit_owed_by_label, edit_owed_by_external_name)
 
             if not edit_child_name.strip():
                 st.error("Child Name is required.")
+            elif not paid_by_member["name"]:
+                st.error("Paid By Name is required when using an external person.")
+            elif not owed_by_member["name"]:
+                st.error("Owed By Name is required when using an external person.")
             elif edit_amount <= 0:
                 st.error("Amount must be greater than 0.")
             else:

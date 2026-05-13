@@ -1,4 +1,5 @@
 from utils.db import get_connection
+from utils.schema import ensure_expense_schema
 
 
 def calculate_status(amount_owed, amount_paid):
@@ -13,6 +14,7 @@ def calculate_status(amount_owed, amount_paid):
 
 
 def fetch_expenses_user_owes(household_id, user_id):
+    ensure_expense_schema()
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -37,7 +39,7 @@ def fetch_expenses_user_owes(household_id, user_id):
             e.receipt_path,
             e.notes,
             e.created_at,
-            u.full_name AS receiver_name,
+            COALESCE(u.full_name, e.paid_by) AS receiver_name,
             u.venmo_handle,
             u.zelle_email,
             u.zelle_phone
@@ -58,6 +60,7 @@ def fetch_expenses_user_owes(household_id, user_id):
 
 
 def fetch_payments_by_expense(household_id):
+    ensure_expense_schema()
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -76,7 +79,7 @@ def fetch_payments_by_expense(household_id):
             ep.paid_at,
             ep.created_at,
             payer.full_name AS payer_name,
-            receiver.full_name AS receiver_name
+            COALESCE(receiver.full_name, ep.received_by_name) AS receiver_name
         FROM expense_payments ep
         LEFT JOIN users payer
             ON payer.id = ep.paid_by_user_id
@@ -122,6 +125,7 @@ def apply_payment_to_expenses(
     note,
     paid_at,
 ):
+    ensure_expense_schema()
     conn = get_connection()
     cursor = conn.cursor()
 
@@ -150,6 +154,7 @@ def apply_payment_to_expenses(
 
             expense_id = expense["id"]
             receiving_user_id = expense["paid_by_user_id"]
+            receiving_name = expense.get("receiver_name") or expense.get("paid_by") or ""
 
             cursor.execute(
                 """
@@ -188,19 +193,21 @@ def apply_payment_to_expenses(
                     household_id,
                     paid_by_user_id,
                     received_by_user_id,
+                    received_by_name,
                     method,
                     amount,
                     external_reference,
                     note,
                     paid_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     expense_id,
                     household_id,
                     paying_user_id,
                     receiving_user_id,
+                    receiving_name,
                     method,
                     amount_to_apply,
                     external_reference,

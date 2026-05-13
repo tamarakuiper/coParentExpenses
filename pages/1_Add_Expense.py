@@ -7,10 +7,13 @@ import streamlit as st
 from utils.auth import require_login
 from utils.db import get_connection
 from utils.household_admin import fetch_household_members
+from utils.household_config import CHILD_OPTIONS, OTHER_PARTICIPANT_LABEL
+from utils.schema import ensure_expense_schema
 
 st.set_page_config(page_title="Add Expense", page_icon="🧾", layout="wide")
 
 current_user = require_login()
+ensure_expense_schema()
 
 UPLOAD_DIR = Path("uploads/receipts")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
@@ -138,6 +141,7 @@ member_options = {
     for member in members
 }
 member_labels = list(member_options.keys())
+participant_labels = member_labels + [OTHER_PARTICIPANT_LABEL]
 
 default_paid_by_index = 0
 for i, label in enumerate(member_labels):
@@ -163,7 +167,7 @@ with st.form("add_expense_form", clear_on_submit=True):
     col1, col2 = st.columns(2)
 
     with col1:
-        child_name = st.text_input("Child Name")
+        child_name = st.selectbox("Child Name", CHILD_OPTIONS)
         category = st.selectbox("Category", CATEGORY_OPTIONS)
         description = st.text_input("Description")
         amount = st.number_input("Total Amount", min_value=0.0, format="%.2f")
@@ -172,14 +176,22 @@ with st.form("add_expense_form", clear_on_submit=True):
     with col2:
         paid_by_label = st.selectbox(
             "Paid By",
-            member_labels,
+            participant_labels,
             index=default_paid_by_index,
         )
         owed_by_label = st.selectbox(
             "Owed By",
-            member_labels,
+            participant_labels,
             index=default_owed_by_index,
         )
+        paid_by_external_name = ""
+        if paid_by_label == OTHER_PARTICIPANT_LABEL:
+            paid_by_external_name = st.text_input("Paid By Name")
+
+        owed_by_external_name = ""
+        if owed_by_label == OTHER_PARTICIPANT_LABEL:
+            owed_by_external_name = st.text_input("Owed By Name")
+
         split_type = st.selectbox("Split Type", ["percent"])
         split_value = st.number_input(
             "Percent Owed",
@@ -197,11 +209,21 @@ with st.form("add_expense_form", clear_on_submit=True):
     submitted = st.form_submit_button("Save Expense", type="primary")
 
 if submitted:
-    paid_by_member = member_options[paid_by_label]
-    owed_by_member = member_options[owed_by_label]
+    def resolve_participant(label, external_name):
+        if label == OTHER_PARTICIPANT_LABEL:
+            name = (external_name or "").strip()
+            return {"id": None, "name": name, "email": "", "role": "external"}
+        return member_options[label]
+
+    paid_by_member = resolve_participant(paid_by_label, paid_by_external_name)
+    owed_by_member = resolve_participant(owed_by_label, owed_by_external_name)
 
     if not child_name.strip():
         st.error("Child Name is required.")
+    elif not paid_by_member["name"]:
+        st.error("Paid By Name is required when using an external person.")
+    elif not owed_by_member["name"]:
+        st.error("Owed By Name is required when using an external person.")
     elif amount <= 0:
         st.error("Amount must be greater than 0.")
     else:

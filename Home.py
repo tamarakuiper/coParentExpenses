@@ -4,7 +4,13 @@ from utils.auth import is_logged_in, get_current_user, logout_user, require_logi
 from utils.db import get_connection
 from utils.invites import create_household_invite
 from utils.household_admin import fetch_household_members, remove_household_member
-from utils.household_children import seed_default_children_if_empty, save_household_child_names
+from utils.household_children import (
+    seed_default_children_if_empty,
+    save_household_child_names,
+    normalize_expense_child_names,
+    fetch_unmapped_expense_child_names,
+    remap_expense_child_name,
+)
 from utils.emailer import send_household_invite_email
 from datetime import datetime
 import os
@@ -204,8 +210,50 @@ def render_logged_in_home():
                 st.error("Add at least one child name.")
             else:
                 saved_names = save_household_child_names(current_user["household_id"], child_names)
-                st.success("Household children updated: " + ", ".join(saved_names))
+                normalized_count = normalize_expense_child_names(current_user["household_id"], saved_names)
+                message = "Household children updated: " + ", ".join(saved_names)
+                if normalized_count:
+                    message += f". Also updated {normalized_count} existing expense row(s) to match the saved spelling."
+                st.success(message)
                 st.rerun()
+
+        household_child_names = seed_default_children_if_empty(current_user["household_id"])
+        unmapped_child_names = fetch_unmapped_expense_child_names(
+            current_user["household_id"],
+            household_child_names,
+        )
+
+        if unmapped_child_names:
+            st.warning(
+                "Some existing expenses use child names that are not in your household child list. "
+                "Map them below so the Ledger does not show duplicate children."
+            )
+
+            with st.form("map_existing_expense_children"):
+                mappings = {}
+                for old_name in unmapped_child_names:
+                    mappings[old_name] = st.selectbox(
+                        f"Map existing expenses for '{old_name}' to",
+                        household_child_names,
+                        key=f"map_child_{old_name}",
+                    )
+
+                submitted_mappings = st.form_submit_button("Update Existing Expenses", type="primary")
+
+            if submitted_mappings:
+                total_updated = 0
+                for old_name, new_name in mappings.items():
+                    if old_name != new_name:
+                        total_updated += remap_expense_child_name(
+                            current_user["household_id"],
+                            old_name,
+                            new_name,
+                        )
+
+                st.success(f"Updated {total_updated} existing expense row(s).")
+                st.rerun()
+        else:
+            st.caption("Existing expense child names are already matched to the household child list.")
 
         st.markdown("---")
         st.subheader("Manage household")

@@ -116,3 +116,117 @@ def save_household_child_names(household_id, child_names):
     conn.commit()
     conn.close()
     return cleaned_names
+
+
+def _normalize_child_key(name):
+    return " ".join((name or "").strip().lower().split())
+
+
+def fetch_existing_expense_child_names(household_id):
+    ensure_household_children_schema()
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        SELECT DISTINCT child_name
+        FROM expenses
+        WHERE household_id = ?
+          AND child_name IS NOT NULL
+          AND TRIM(child_name) != ''
+        ORDER BY child_name ASC
+        """,
+        (household_id,),
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [row["child_name"] for row in rows if row["child_name"]]
+
+
+def normalize_expense_child_names(household_id, child_names=None):
+    """Update existing expenses to use the saved household child spelling/casing.
+
+    This fixes rows such as "alex", "Alex " or "  Alex" after the household
+    child is saved as "Alex". It intentionally does not guess between truly
+    different names. Use remap_expense_child_name for explicit one-to-one mapping.
+    """
+    if child_names is None:
+        child_names = fetch_household_child_names(household_id)
+
+    canonical_by_key = {
+        _normalize_child_key(name): name.strip()
+        for name in child_names
+        if _normalize_child_key(name)
+    }
+
+    existing_names = fetch_existing_expense_child_names(household_id)
+    updates = []
+    for old_name in existing_names:
+        key = _normalize_child_key(old_name)
+        canonical_name = canonical_by_key.get(key)
+        if canonical_name and old_name != canonical_name:
+            updates.append((canonical_name, old_name))
+
+    if not updates:
+        return 0
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    total = 0
+    for canonical_name, old_name in updates:
+        cursor.execute(
+            """
+            UPDATE expenses
+            SET child_name = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE household_id = ?
+              AND child_name = ?
+            """,
+            (canonical_name, household_id, old_name),
+        )
+        total += cursor.rowcount
+
+    conn.commit()
+    conn.close()
+    return total
+
+
+def fetch_unmapped_expense_child_names(household_id, child_names=None):
+    if child_names is None:
+        child_names = fetch_household_child_names(household_id)
+
+    household_keys = {
+        _normalize_child_key(name)
+        for name in child_names
+        if _normalize_child_key(name)
+    }
+
+    return [
+        name
+        for name in fetch_existing_expense_child_names(household_id)
+        if _normalize_child_key(name) not in household_keys
+    ]
+
+
+def remap_expense_child_name(household_id, old_child_name, new_child_name):
+    old_child_name = (old_child_name or "").strip()
+    new_child_name = (new_child_name or "").strip()
+
+    if not old_child_name or not new_child_name:
+        return 0
+
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        UPDATE expenses
+        SET child_name = ?,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE household_id = ?
+          AND child_name = ?
+        """,
+        (new_child_name, household_id, old_child_name),
+    )
+    count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return count

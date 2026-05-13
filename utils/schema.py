@@ -102,6 +102,22 @@ def ensure_expense_schema():
 
     cursor.execute(
         """
+        CREATE TABLE IF NOT EXISTS household_children (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            household_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT,
+            UNIQUE(household_id, name),
+            FOREIGN KEY (household_id) REFERENCES households(id)
+        )
+        """
+    )
+
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS payment_allocations (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             payment_id INTEGER NOT NULL,
@@ -114,5 +130,28 @@ def ensure_expense_schema():
         """
     )
 
+    conn.commit()
+    conn.close()
+
+
+
+def ensure_household_children_schema():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS household_children (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            household_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT,
+            UNIQUE(household_id, name),
+            FOREIGN KEY (household_id) REFERENCES households(id)
+        )
+        """
+    )
     conn.commit()
     conn.close()

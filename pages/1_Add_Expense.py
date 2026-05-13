@@ -7,7 +7,8 @@ import streamlit as st
 from utils.auth import require_login
 from utils.db import get_connection
 from utils.household_admin import fetch_household_members
-from utils.household_config import CHILD_OPTIONS, OTHER_PARTICIPANT_LABEL
+from utils.household_config import OTHER_PARTICIPANT_LABEL
+from utils.household_children import seed_default_children_if_empty
 from utils.schema import ensure_expense_schema
 
 st.set_page_config(page_title="Add Expense", page_icon="🧾", layout="wide")
@@ -125,6 +126,8 @@ if not household_id:
     st.error("Your account is not linked to a household yet.")
     st.stop()
 
+child_options = seed_default_children_if_empty(household_id)
+
 members = fetch_household_members(household_id, current_user["user_id"])
 
 if not members:
@@ -167,7 +170,7 @@ with st.form("add_expense_form", clear_on_submit=True):
     col1, col2 = st.columns(2)
 
     with col1:
-        child_name = st.selectbox("Child Name", CHILD_OPTIONS)
+        child_name = st.selectbox("Child Name", child_options)
         category = st.selectbox("Category", CATEGORY_OPTIONS)
         description = st.text_input("Description")
         amount = st.number_input("Total Amount", min_value=0.0, format="%.2f")

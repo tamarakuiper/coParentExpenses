@@ -4,6 +4,7 @@ from utils.auth import is_logged_in, get_current_user, logout_user, require_logi
 from utils.db import get_connection
 from utils.invites import create_household_invite
 from utils.household_admin import fetch_household_members, remove_household_member
+from utils.household_children import seed_default_children_if_empty, save_household_child_names
 from utils.emailer import send_household_invite_email
 from datetime import datetime
 import os
@@ -16,192 +17,6 @@ st.set_page_config(
     page_title="Co-Parent Shared Expenses",
     page_icon="🏠",
     layout="wide",
-)
-
-st.markdown(
-    """
-    <style>
-        .stApp {
-            background:
-                radial-gradient(circle at top left, rgba(37, 99, 235, 0.10), transparent 28%),
-                radial-gradient(circle at top right, rgba(16, 185, 129, 0.08), transparent 24%),
-                linear-gradient(180deg, #f8fbff 0%, #eef4fb 100%);
-        }
-
-        .block-container {
-            max-width: 1180px;
-            padding-top: 2.2rem;
-            padding-bottom: 2rem;
-        }
-
-        h1, h2, h3 {
-            color: #0f172a;
-            letter-spacing: -0.02em;
-        }
-
-        h1 {
-            font-size: 2.35rem !important;
-            font-weight: 800 !important;
-            margin-bottom: 0.5rem !important;
-        }
-
-        h2, h3 {
-            font-weight: 700 !important;
-        }
-
-        p, li, label, .stMarkdown, .stCaption {
-            color: #334155;
-        }
-
-        hr {
-            border: none;
-            height: 1px;
-            background: linear-gradient(90deg, transparent, rgba(100,116,139,0.35), transparent);
-            margin-top: 1.4rem;
-            margin-bottom: 1.4rem;
-        }
-
-        div[data-testid="stAlert"] {
-            border-radius: 18px;
-            border: 1px solid rgba(148, 163, 184, 0.20);
-            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
-            padding: 0.85rem 1rem;
-        }
-
-        .stButton > button,
-        .stDownloadButton > button,
-        .stFormSubmitButton > button {
-            border-radius: 14px !important;
-            border: 1px solid rgba(37, 99, 235, 0.18) !important;
-            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%) !important;
-            color: white !important;
-            font-weight: 700 !important;
-            min-height: 2.8rem !important;
-            padding: 0.55rem 1.1rem !important;
-            box-shadow: 0 10px 18px rgba(37, 99, 235, 0.22);
-            transition: all 0.18s ease-in-out;
-        }
-
-        .stButton > button:hover,
-        .stDownloadButton > button:hover,
-        .stFormSubmitButton > button:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 14px 24px rgba(37, 99, 235, 0.28);
-            border-color: rgba(37, 99, 235, 0.28) !important;
-        }
-
-        .stButton > button:active,
-        .stDownloadButton > button:active,
-        .stFormSubmitButton > button:active {
-            transform: translateY(0px);
-        }
-
-        .stButton > button[kind="secondary"] {
-            background: white !important;
-            color: #1e3a8a !important;
-            border: 1px solid rgba(37, 99, 235, 0.22) !important;
-            box-shadow: 0 8px 16px rgba(15, 23, 42, 0.06);
-        }
-
-        .stButton > button[kind="secondary"]:hover {
-            background: #eff6ff !important;
-        }
-
-        .stTextInput > div > div,
-        .stSelectbox > div > div,
-        .stTextArea > div > div,
-        .stDateInput > div > div,
-        .stNumberInput > div > div {
-            border-radius: 14px !important;
-            border: 1px solid rgba(148, 163, 184, 0.32) !important;
-            background: rgba(255, 255, 255, 0.90) !important;
-            box-shadow: 0 6px 16px rgba(15, 23, 42, 0.04);
-        }
-
-        .stTextInput > div > div:focus-within,
-        .stSelectbox > div > div:focus-within,
-        .stTextArea > div > div:focus-within,
-        .stDateInput > div > div:focus-within,
-        .stNumberInput > div > div:focus-within {
-            border-color: rgba(37, 99, 235, 0.50) !important;
-            box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.10);
-        }
-
-        .stCheckbox {
-            padding-top: 0.25rem;
-            padding-bottom: 0.25rem;
-        }
-
-        div[data-testid="stForm"] {
-            background: rgba(255, 255, 255, 0.72);
-            border: 1px solid rgba(148, 163, 184, 0.18);
-            border-radius: 22px;
-            padding: 1.1rem 1.1rem 0.6rem 1.1rem;
-            box-shadow: 0 14px 32px rgba(15, 23, 42, 0.07);
-            backdrop-filter: blur(10px);
-            -webkit-backdrop-filter: blur(10px);
-            margin-bottom: 1rem;
-        }
-
-        div[data-testid="stPageLink"] a {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.4rem;
-            padding: 0.7rem 0.95rem;
-            border-radius: 14px;
-            text-decoration: none !important;
-            font-weight: 700;
-            color: #1d4ed8 !important;
-            background: rgba(255,255,255,0.78);
-            border: 1px solid rgba(37, 99, 235, 0.14);
-            box-shadow: 0 8px 18px rgba(15, 23, 42, 0.05);
-            transition: all 0.18s ease;
-        }
-
-        div[data-testid="stPageLink"] a:hover {
-            background: #eff6ff;
-            border-color: rgba(37, 99, 235, 0.24);
-            transform: translateY(-1px);
-        }
-
-        section[data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #0f172a 0%, #172554 100%);
-            border-right: 1px solid rgba(255,255,255,0.06);
-        }
-
-        section[data-testid="stSidebar"] * {
-            color: #e5eefc !important;
-        }
-
-        section[data-testid="stSidebar"] .stPageLink a,
-        section[data-testid="stSidebar"] a {
-            border-radius: 12px !important;
-        }
-
-        section[data-testid="stSidebar"] .stPageLink a:hover,
-        section[data-testid="stSidebar"] a:hover {
-            background: rgba(255,255,255,0.08) !important;
-        }
-
-        header[data-testid="stHeader"] {
-            background: rgba(255,255,255,0.75);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-        }
-
-        .stSelectbox label,
-        .stTextInput label,
-        .stCheckbox label {
-            font-weight: 600 !important;
-            color: #1e293b !important;
-        }
-
-        div[data-testid="stMarkdownContainer"] p {
-            line-height: 1.6;
-        }
-    </style>
-    """,
-    unsafe_allow_html=True,
 )
 
 
@@ -312,25 +127,10 @@ def render_logged_in_home():
     current_user = require_login()
     current_user_email = get_current_user_email(current_user["user_id"])
 
-    st.markdown(
-        f"""
-        <div style="
-            background: linear-gradient(135deg, #0f172a 0%, #1d4ed8 100%);
-            color: white;
-            padding: 1.4rem 1.6rem;
-            border-radius: 24px;
-            box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
-            margin-bottom: 1rem;
-        ">
-            <div style="font-size: 0.95rem; opacity: 0.85; font-weight: 600;">Co-Parent Shared Expenses</div>
-            <div style="font-size: 2rem; font-weight: 800; margin-top: 0.2rem;">Welcome, {current_user['user_name']}</div>
-            <div style="margin-top: 0.45rem; font-size: 1rem; opacity: 0.92;">
-                Household: {current_user['household_name']}
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.title("🏠 Co-Parent Shared Expenses")
+    st.success(f"Logged in as {current_user['user_name']}")
+    st.info(f"Household: {current_user['household_name']}")
+    st.write("Use the menu on the left to manage your household expenses.")
 
     payment_profile = get_payment_profile(current_user["user_id"])
     has_payment_details = any(
@@ -385,6 +185,27 @@ def render_logged_in_home():
                     st.error(str(exc))
                 except Exception as exc:
                     st.error(f"Something went wrong while creating or sending the invite: {exc}")
+
+        st.markdown("---")
+        st.subheader("Manage household children")
+        st.write("These names appear in the Child dropdown when adding or editing expenses.")
+
+        current_child_names = seed_default_children_if_empty(current_user["household_id"])
+        child_names_text = st.text_area(
+            "Children",
+            value="\n".join(current_child_names),
+            help="Enter one child name per line.",
+            key="household_children_text",
+        )
+
+        if st.button("Save Children", type="primary"):
+            child_names = [line.strip() for line in child_names_text.splitlines() if line.strip()]
+            if not child_names:
+                st.error("Add at least one child name.")
+            else:
+                saved_names = save_household_child_names(current_user["household_id"], child_names)
+                st.success("Household children updated: " + ", ".join(saved_names))
+                st.rerun()
 
         st.markdown("---")
         st.subheader("Manage household")

@@ -8,7 +8,8 @@ from utils.db import get_connection
 from utils.receipt_utils import render_receipt
 from utils.auth import require_login
 from utils.payments import fetch_payments_by_expense
-from utils.household_config import CHILD_OPTIONS, OTHER_PARTICIPANT_LABEL
+from utils.household_config import OTHER_PARTICIPANT_LABEL
+from utils.household_children import seed_default_children_if_empty
 from utils.schema import ensure_expense_schema
 
 st.set_page_config(page_title="Ledger", page_icon="📒", layout="wide")
@@ -209,6 +210,8 @@ def delete_expense(expense_id, household_id, current_user_id):
 st.title("📒 Expense Ledger")
 st.write("View shared expenses, receipts, payments, and outstanding balances.")
 
+household_child_options = seed_default_children_if_empty(current_user["household_id"])
+
 members = fetch_household_members(current_user["household_id"])
 if not members:
     st.error("No household members found.")
@@ -281,7 +284,11 @@ m4.metric("Outstanding", f"${total_outstanding:,.2f}")
 
 st.divider()
 
-child_options = sorted(set(CHILD_OPTIONS) | {item["child_name"] for item in expenses if item["child_name"]})
+child_options = household_child_options + [
+    item["child_name"]
+    for item in expenses
+    if item["child_name"] and item["child_name"] not in household_child_options
+]
 category_options = sorted({item["category"] for item in expenses if item["category"]})
 status_options = sorted({item["status"] for item in expenses if item["status"]})
 

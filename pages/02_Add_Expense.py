@@ -16,6 +16,17 @@ st.set_page_config(page_title="Add Expense", page_icon="🧾", layout="wide")
 current_user = require_login()
 ensure_expense_schema()
 
+def render_sidebar_nav():
+    with st.sidebar:
+        st.page_link("Home.py", label="Home")
+        st.page_link("pages/01_Summary.py", label="Summary")
+        st.page_link("pages/02_Add_Expense.py", label="Add Expense")
+        st.page_link("pages/05_Update_Payment.py", label="Update Payment")
+        st.page_link("pages/04_Ledger.py", label="Ledger")
+        st.page_link("pages/07_Profile.py", label="Profile")
+
+render_sidebar_nav()
+
 UPLOAD_DIR = Path("uploads/receipts")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -130,9 +141,33 @@ child_options = seed_default_children_if_empty(household_id)
 
 members = fetch_household_members(household_id, current_user["user_id"])
 
+current_user_member = {
+    "user_id": current_user["user_id"],
+    "full_name": current_user.get("user_name", current_user.get("email", "Current_User")),
+    "email": current_user.get("email", ""),
+    "role": current_user.get("role", "member"),
+}
+
+members_by_id = {
+    member["user_id"]: member
+    for member in members
+
+}
+
+
+members_by_id[current_user_member["user_id"]] = {
+    **current_user_member,
+    **members_by_id.get(current_user_member["user_id"], {}),
+}
+
+members = list(members_by_id.values())
+
 if not members:
     st.error("No household members were found for your account.")
     st.stop()
+
+
+
 
 member_options = {
     f"{member['full_name']} ({member['email']})": {

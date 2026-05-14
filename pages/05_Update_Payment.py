@@ -5,6 +5,17 @@ from utils.payments import fetch_expenses_user_owes, apply_payment_to_expenses
 
 current_user = require_login()
 
+def render_sidebar_nav():
+    with st.sidebar:
+        st.page_link("Home.py", label="Home")
+        st.page_link("pages/01_Summary.py", label="Summary")
+        st.page_link("pages/02_Add_Expense.py", label="Add Expense")
+        st.page_link("pages/05_Update_Payment.py", label="Update Payment")
+        st.page_link("pages/04_Ledger.py", label="Ledger")
+        st.page_link("pages/07_Profile.py", label="Profile")
+
+render_sidebar_nav()
+
 st.set_page_config(page_title="Update Payment", page_icon="💳", layout="wide")
 
 st.title("💳 Update Payment")

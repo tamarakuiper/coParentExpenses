@@ -7,6 +7,17 @@ st.set_page_config(page_title="Profile", page_icon="👤", layout="wide")
 
 current_user = require_login()
 
+def render_sidebar_nav():
+    with st.sidebar:
+        st.page_link("Home.py", label="Home")
+        st.page_link("pages/01_Summary.py", label="Summary")
+        st.page_link("pages/02_Add_Expense.py", label="Add Expense")
+        st.page_link("pages/05_Update_Payment.py", label="Update Payment")
+        st.page_link("pages/04_Ledger.py", label="Ledger")
+        st.page_link("pages/07_Profile.py", label="Profile")
+
+render_sidebar_nav()
+
 
 def fetch_user_profile(user_id):
     conn = get_connection()

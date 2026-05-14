@@ -1,12 +1,13 @@
 import uuid
-from datetime import datetime
 from pathlib import Path
+from datetime import datetime, date
 
 import streamlit as st
 
 from utils.auth import require_login
 from utils.db import get_connection
 from utils.receipt_utils import render_receipt
+
 
 st.set_page_config(page_title="Edit or Delete Expense", page_icon="✏️", layout="wide")
 
@@ -15,51 +16,14 @@ current_user = require_login()
 UPLOAD_DIR = Path("uploads/receipts")
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
-CATEGORY_OPTIONS = [
-    "Medical",
-    "School",
-    "Childcare",
-    "Activities",
-    "Clothing",
-    "Food",
-    "Transportation",
-    "Other",
-]
 
-
-def fetch_household_members(household_id):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        """
-        SELECT
-            u.id,
-            u.full_name,
-            u.email,
-            hm.role
-        FROM household_members hm
-        JOIN users u
-            ON u.id = hm.user_id
-        WHERE hm.household_id = ?
-        ORDER BY u.full_name ASC, u.email ASC
-        """,
-        (household_id,),
-    )
-    rows = cursor.fetchall()
-    conn.close()
-    return rows
-
-
-def fetch_expenses(household_id):
+def fetch_expenses():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
         """
         SELECT
             id,
-            household_id,
-            created_by_user_id,
-            updated_by_user_id,
             child_name,
             category,
             description,
@@ -67,8 +31,6 @@ def fetch_expenses(household_id):
             expense_date,
             paid_by,
             owed_by,
-            paid_by_user_id,
-            owed_by_user_id,
             split_type,
             split_value,
             amount_owed,
@@ -76,12 +38,11 @@ def fetch_expenses(household_id):
             status,
             receipt_path,
             notes,
-            created_at
+            created_at,
+            created_by_user_id
         FROM expenses
-        WHERE household_id = ?
         ORDER BY expense_date DESC, id DESC
-        """,
-        (household_id,),
+        """
     )
     rows = cursor.fetchall()
     conn.close()
@@ -96,8 +57,8 @@ def save_receipt(uploaded_file):
     filename = f"{uuid.uuid4().hex}{extension}"
     filepath = UPLOAD_DIR / filename
 
-    with open(filepath, "wb") as file_handle:
-        file_handle.write(uploaded_file.getbuffer())
+    with open(filepath, "wb") as f:
+        f.write(uploaded_file.getbuffer())
 
     return str(filepath).replace("\\", "/")
 
@@ -110,10 +71,15 @@ def calculate_status(amount_owed, amount_paid):
     return "paid"
 
 
+def parse_expense_date(value):
+    if isinstance(value, date):
+        return value
+    return datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
+
+
 def update_expense(
     expense_id,
-    household_id,
-    current_user_id,
+    created_by_user_id,
     child_name,
     category,
     description,
@@ -121,8 +87,6 @@ def update_expense(
     expense_date,
     paid_by,
     owed_by,
-    paid_by_user_id,
-    owed_by_user_id,
     split_type,
     split_value,
     amount_owed,
@@ -144,18 +108,14 @@ def update_expense(
             expense_date = ?,
             paid_by = ?,
             owed_by = ?,
-            paid_by_user_id = ?,
-            owed_by_user_id = ?,
             split_type = ?,
             split_value = ?,
             amount_owed = ?,
             amount_paid = ?,
             status = ?,
             receipt_path = ?,
-            notes = ?,
-            updated_by_user_id = ?
+            notes = ?
         WHERE id = ?
-          AND household_id = ?
           AND created_by_user_id = ?
         """,
         (
@@ -166,8 +126,6 @@ def update_expense(
             expense_date,
             paid_by,
             owed_by,
-            paid_by_user_id,
-            owed_by_user_id,
             split_type,
             split_value,
             amount_owed,
@@ -175,68 +133,43 @@ def update_expense(
             status,
             receipt_path,
             notes,
-            current_user_id,
             expense_id,
-            household_id,
-            current_user_id,
+            created_by_user_id,
         ),
     )
-    affected = cursor.rowcount
+    updated_count = cursor.rowcount
     conn.commit()
     conn.close()
-    return affected > 0
+    return updated_count
 
 
-def delete_expense(expense_id, household_id, current_user_id):
+def delete_expense(expense_id, created_by_user_id):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
         """
         DELETE FROM expenses
         WHERE id = ?
-          AND household_id = ?
           AND created_by_user_id = ?
         """,
-        (expense_id, household_id, current_user_id),
+        (expense_id, created_by_user_id),
     )
-    affected = cursor.rowcount
+    deleted_count = cursor.rowcount
     conn.commit()
     conn.close()
-    return affected > 0
+    return deleted_count
 
-
-household_id = current_user.get("household_id")
-if not household_id:
-    st.error("Your account is not linked to a household yet.")
-    st.stop()
-
-members = fetch_household_members(household_id)
-if not members:
-    st.error("No household members were found for your household.")
-    st.stop()
-
-member_lookup = {
-    member["id"]: {
-        "id": member["id"],
-        "name": member["full_name"],
-        "email": member["email"],
-        "role": member["role"],
-    }
-    for member in members
-}
-member_labels = {
-    member["id"]: f"{member['full_name']} ({member['email']})"
-    for member in members
-}
 
 st.title("✏️ Edit or Delete Expense")
 st.write("Update an existing expense or remove it from the ledger.")
-st.caption(
-    f"Signed in as {current_user['user_name']} • "
-    f"Household: {current_user.get('household_name', 'Unknown Household')}"
-)
 
-rows = fetch_expenses(household_id)
+if st.session_state.get("expense_saved"):
+    st.success(st.session_state.pop("expense_saved"))
+
+if st.session_state.get("expense_deleted"):
+    st.success(st.session_state.pop("expense_deleted"))
+
+rows = fetch_expenses()
 
 if not rows:
     st.info("No expenses found yet. Add an expense first.")
@@ -246,93 +179,77 @@ expense_options = []
 expense_lookup = {}
 
 for row in rows:
-    amount = float(row["amount"] or 0)
-    label = (
-        f"#{row['id']} | {row['expense_date']} | {row['child_name'] or ''} | "
-        f"{row['category'] or ''} | ${amount:,.2f}"
-    )
+    expense_id = row[0]
+    child_name = row[1] or ""
+    category = row[2] or ""
+    description = row[3] or ""
+    amount = float(row[4] or 0)
+    expense_date = row[5]
+    paid_by = row[6] or ""
+    owed_by = row[7] or ""
+    split_type = row[8] or "percent"
+    split_value = float(row[9] or 50)
+    amount_owed = float(row[10] or 0)
+    amount_paid = float(row[11] or 0)
+    status = row[12] or "outstanding"
+    receipt_path = row[13] or ""
+    notes = row[14] or ""
+    created_at = row[15] or ""
+    created_by_user_id = row[16]
+
+    label = f"#{expense_id} | {expense_date} | {child_name} | {category} | ${amount:,.2f}"
     expense_options.append(label)
     expense_lookup[label] = {
-        "id": row["id"],
-        "household_id": row["household_id"],
-        "created_by_user_id": row["created_by_user_id"],
-        "updated_by_user_id": row["updated_by_user_id"],
-        "child_name": row["child_name"] or "",
-        "category": row["category"] or "",
-        "description": row["description"] or "",
+        "id": expense_id,
+        "child_name": child_name,
+        "category": category,
+        "description": description,
         "amount": amount,
-        "expense_date": row["expense_date"],
-        "paid_by": row["paid_by"] or "",
-        "owed_by": row["owed_by"] or "",
-        "paid_by_user_id": row["paid_by_user_id"],
-        "owed_by_user_id": row["owed_by_user_id"],
-        "split_type": row["split_type"] or "percent",
-        "split_value": float(row["split_value"] or 50),
-        "amount_owed": float(row["amount_owed"] or 0),
-        "amount_paid": float(row["amount_paid"] or 0),
-        "status": row["status"] or "outstanding",
-        "receipt_path": row["receipt_path"] or "",
-        "notes": row["notes"] or "",
-        "created_at": row["created_at"] or "",
+        "expense_date": expense_date,
+        "paid_by": paid_by,
+        "owed_by": owed_by,
+        "split_type": split_type,
+        "split_value": split_value,
+        "amount_owed": amount_owed,
+        "amount_paid": amount_paid,
+        "status": status,
+        "receipt_path": receipt_path,
+        "notes": notes,
+        "created_at": created_at,
+        "created_by_user_id": created_by_user_id,
     }
 
 selected_label = st.selectbox("Select Expense", expense_options)
 selected = expense_lookup[selected_label]
 
-can_edit = selected["created_by_user_id"] == current_user["user_id"]
-creator_name = "Unknown"
-if selected["created_by_user_id"] in member_lookup:
-    creator_name = member_lookup[selected["created_by_user_id"]]["name"]
+if selected["created_by_user_id"] != current_user["user_id"]:
+    st.error("You can only edit or delete expenses you created.")
+    st.stop()
 
 st.subheader("Current Record")
 c1, c2, c3 = st.columns(3)
 c1.write(f"**ID:** {selected['id']}")
 c1.write(f"**Child:** {selected['child_name']}")
 c1.write(f"**Category:** {selected['category']}")
-c1.write(f"**Created By:** {creator_name}")
-
 c2.write(f"**Amount:** ${selected['amount']:,.2f}")
 c2.write(f"**Amount Owed:** ${selected['amount_owed']:,.2f}")
 c2.write(f"**Amount Paid:** ${selected['amount_paid']:,.2f}")
-c2.write(f"**Status:** {selected['status']}")
-
+c3.write(f"**Status:** {selected['status']}")
 c3.write(f"**Date:** {selected['expense_date']}")
 c3.write(f"**Receipt:** {'Yes' if selected['receipt_path'] else 'No'}")
-c3.write(f"**Created At:** {selected['created_at']}")
-
-st.subheader("Current Receipt")
-render_receipt(selected["receipt_path"], key_prefix=f"edit_{selected['id']}")
-
-if not can_edit:
-    st.warning("You can view this expense, but only the person who created it can edit or delete it.")
-    st.stop()
 
 st.divider()
 
-member_ids = list(member_lookup.keys())
-paid_by_default_index = 0
-owed_by_default_index = 0
-
-if selected["paid_by_user_id"] in member_ids:
-    paid_by_default_index = member_ids.index(selected["paid_by_user_id"])
-else:
-    for i, member_id in enumerate(member_ids):
-        if member_lookup[member_id]["name"] == selected["paid_by"]:
-            paid_by_default_index = i
-            break
-
-if selected["owed_by_user_id"] in member_ids:
-    owed_by_default_index = member_ids.index(selected["owed_by_user_id"])
-else:
-    for i, member_id in enumerate(member_ids):
-        if member_lookup[member_id]["name"] == selected["owed_by"]:
-            owed_by_default_index = i
-            break
-
-try:
-    parsed_date = datetime.strptime(selected["expense_date"], "%Y-%m-%d").date()
-except Exception:
-    parsed_date = datetime.today().date()
+categories = [
+    "Medical",
+    "School",
+    "Childcare",
+    "Activities",
+    "Clothing",
+    "Food",
+    "Transportation",
+    "Other",
+]
 
 with st.form("edit_expense_form"):
     left, right = st.columns(2)
@@ -341,10 +258,8 @@ with st.form("edit_expense_form"):
         child_name = st.text_input("Child Name", value=selected["child_name"])
         category = st.selectbox(
             "Category",
-            CATEGORY_OPTIONS,
-            index=CATEGORY_OPTIONS.index(selected["category"])
-            if selected["category"] in CATEGORY_OPTIONS
-            else 0,
+            categories,
+            index=categories.index(selected["category"]) if selected["category"] in categories else 0,
         )
         description = st.text_input("Description", value=selected["description"])
         amount = st.number_input(
@@ -353,21 +268,13 @@ with st.form("edit_expense_form"):
             value=float(selected["amount"]),
             format="%.2f",
         )
+
+        parsed_date = parse_expense_date(selected["expense_date"])
         expense_date = st.date_input("Expense Date", value=parsed_date)
 
     with right:
-        paid_by_id = st.selectbox(
-            "Paid By",
-            member_ids,
-            index=paid_by_default_index,
-            format_func=lambda member_id: member_labels[member_id],
-        )
-        owed_by_id = st.selectbox(
-            "Owed By",
-            member_ids,
-            index=owed_by_default_index,
-            format_func=lambda member_id: member_labels[member_id],
-        )
+        paid_by = st.text_input("Paid By", value=selected["paid_by"])
+        owed_by = st.text_input("Owed By", value=selected["owed_by"])
         split_type = st.selectbox("Split Type", ["percent"], index=0)
         split_value = st.number_input(
             "Percent Owed",
@@ -388,11 +295,16 @@ with st.form("edit_expense_form"):
         )
 
     notes = st.text_area("Notes", value=selected["notes"])
+
     save_changes = st.form_submit_button("Save Changes", type="primary")
 
 if save_changes:
     if not child_name.strip():
         st.error("Child Name is required.")
+    elif not paid_by.strip():
+        st.error("Paid By is required.")
+    elif not owed_by.strip():
+        st.error("Owed By is required.")
     elif amount <= 0:
         st.error("Amount must be greater than 0.")
     else:
@@ -403,22 +315,20 @@ if save_changes:
             amount_paid = amount_owed
 
         status = calculate_status(amount_owed, amount_paid)
+
         new_receipt_path = save_receipt(receipt_file)
         receipt_path = new_receipt_path if new_receipt_path else selected["receipt_path"]
 
-        updated = update_expense(
+        updated_count = update_expense(
             expense_id=selected["id"],
-            household_id=household_id,
-            current_user_id=current_user["user_id"],
+            created_by_user_id=current_user["user_id"],
             child_name=child_name.strip(),
             category=category,
             description=description.strip(),
             amount=round(amount, 2),
             expense_date=str(expense_date),
-            paid_by=member_lookup[paid_by_id]["name"],
-            owed_by=member_lookup[owed_by_id]["name"],
-            paid_by_user_id=paid_by_id,
-            owed_by_user_id=owed_by_id,
+            paid_by=paid_by.strip(),
+            owed_by=owed_by.strip(),
             split_type=split_type,
             split_value=round(split_value, 2),
             amount_owed=amount_owed,
@@ -428,16 +338,14 @@ if save_changes:
             notes=notes.strip(),
         )
 
-        if updated:
-            st.success("Expense updated successfully.")
-            st.info(
-                f"Amount owed: ${amount_owed:,.2f} | "
-                f"Amount paid: ${amount_paid:,.2f} | "
-                f"Status: {status}"
+        if updated_count == 0:
+            st.error("No expense was updated. Check that this expense belongs to your account.")
+        else:
+            st.session_state["expense_saved"] = (
+                f"Expense updated successfully. Amount owed: ${amount_owed:,.2f} | "
+                f"Amount paid: ${amount_paid:,.2f} | Status: {status}"
             )
             st.rerun()
-        else:
-            st.error("Update failed. You may not have permission to edit this expense.")
 
 st.divider()
 st.subheader("Delete Expense")
@@ -448,14 +356,12 @@ if st.button("Delete Expense"):
     if not confirm_delete:
         st.warning("Check the confirmation box before deleting.")
     else:
-        deleted = delete_expense(
-            expense_id=selected["id"],
-            household_id=household_id,
-            current_user_id=current_user["user_id"],
-        )
-
-        if deleted:
-            st.success("Expense deleted successfully.")
-            st.rerun()
+        deleted_count = delete_expense(selected["id"], current_user["user_id"])
+        if deleted_count == 0:
+            st.error("No expense was deleted. Check that this expense belongs to your account.")
         else:
-            st.error("Delete failed. You may not have permission to delete this expense.")
+            st.session_state["expense_deleted"] = "Expense deleted successfully."
+            st.rerun()
+
+st.subheader("Current Receipt")
+render_receipt(selected["receipt_path"], key_prefix=f"edit_{selected['id']}")

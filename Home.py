@@ -10,7 +10,7 @@ import datetime
 
 def render_sidebar_nav():
     with st.sidebar:
-        st.page_link("pages/Log_In.py", label="Home")
+        # st.page_link("pages/Log_In.py", label="Home")
         st.page_link("pages/01_Summary.py", label="Summary")
         st.page_link("pages/02_Add_Expense.py", label="Add Expense")
         st.page_link("pages/05_Update_Payment.py", label="Update Payment")
@@ -117,7 +117,7 @@ if not is_logged_in():
 user = require_login()
 user_name = user.get("user_name", "there")
 
-render_sidebar_nav()
+
 
 
 # -----------------------------

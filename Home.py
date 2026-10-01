@@ -95,8 +95,11 @@ def render_logged_in_home():
         st.markdown("---")
     st.subheader("Manage household")
 
-    members = fetch_household_members(current_user["household_id"])
-
+    members = fetch_household_members(
+    current_user["household_id"],
+    current_user["user_id"],
+)
+    
     removable_members = []
     for member in members:
         try:
@@ -173,13 +176,13 @@ def render_logout():
 
 home_page = st.Page(render_home, title="Home", icon="🏠", default=True)
 
-login_page = st.Page("pages/02_Log_In.py", title="Login", icon="🔐")
-signup_page = st.Page("pages/01_Sign_Up.py", title="Signup", icon="🆕")
+login_page = st.Page("pages/Log_In.py", title="Login", icon="🔐")
+signup_page = st.Page("pages/Sign_Up.py", title="Signup", icon="🆕")
 
-summary_page = st.Page("pages/4_Summary.py", title="Summary", icon="📊")
-add_expense_page = st.Page("pages/1_Add_Expense.py", title="Add Expense", icon="🧾")
-ledger_page = st.Page("pages/2_Ledger.py", title="Ledger", icon="📒")
-update_payment_page = st.Page("pages/3_Update_Payment.py", title="Update Payment", icon="💳")
+summary_page = st.Page("pages/01_Summary.py", title="Summary", icon="📊")
+add_expense_page = st.Page("pages/02_Add_Expense.py", title="Add Expense", icon="🧾")
+ledger_page = st.Page("pages/04_Ledger.py", title="Ledger", icon="📒")
+update_payment_page = st.Page("pages/05_Update_Payment.py", title="Update Payment", icon="💳")
 logout_page = st.Page(render_logout, title="Log Out", icon="🚪")
 
 if is_logged_in():

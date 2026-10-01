@@ -7,9 +7,31 @@ def _columns(cursor, table_name):
 
 
 def _ensure_column(cursor, table_name, column_name, definition):
-    if column_name not in _columns(cursor, table_name):
-        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+    cursor.execute(
+        """
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table'
+        AND name = ?
+        """,
+        (table_name,),
+    )
 
+    if cursor.fetchone() is None:
+        raise RuntimeError(
+            f"Cannot add column '{column_name}' because "
+            f"table '{table_name}' does not exist."
+        )
+
+    cursor.execute(f"PRAGMA table_info({table_name})")
+    existing_columns = [row["name"] for row in cursor.fetchall()]
+
+    if column_name not in existing_columns:
+        cursor.execute(
+            f"ALTER TABLE {table_name} "
+            f"ADD COLUMN {column_name} {definition}"
+        )
+        
 
 def _ensure_payment_table(cursor):
     cursor.execute(

@@ -224,7 +224,7 @@ div[data-testid="stAlert"] {
 if is_logged_in():
     st.success("You are already logged in.")
     if st.button("Go to Home"):
-        st.switch_page("Home.py")
+        st.rerun()
     st.stop()
 
 
@@ -257,7 +257,7 @@ if submitted:
     else:
         success, msg = login_user(email.strip(), password)
         if success:
-            st.switch_page("Home.py")
+            st.rerun()
         else:
             st.error(msg)
 
@@ -272,7 +272,7 @@ with signup_card:
     )
 
     if st.button("🆕 Create account", use_container_width=True):
-        st.switch_page("pages/Sign_Up.py")
+        st.rerun()
 
 
 # FOOTER

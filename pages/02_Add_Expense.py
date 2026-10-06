@@ -6,7 +6,7 @@ import streamlit as st
 
 from utils.auth import require_login
 from utils.db import get_connection
-from utils.household_admin import fetch_household_members
+from utils.household_admin import fetch_household_members, fetch_pending_household_invites
 from utils.household_config import OTHER_PARTICIPANT_LABEL
 from utils.household_children import seed_default_children_if_empty
 from utils.schema import ensure_expense_schema
@@ -58,6 +58,7 @@ def insert_expense(
     owed_by,
     paid_by_user_id,
     owed_by_user_id,
+    owed_by_invite_id,
     split_type,
     split_value,
     amount_owed,
@@ -84,6 +85,7 @@ def insert_expense(
             owed_by,
             paid_by_user_id,
             owed_by_user_id,
+            owed_by_invite_id,
             split_type,
             split_value,
             amount_owed,
@@ -92,7 +94,7 @@ def insert_expense(
             receipt_path,
             notes
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             household_id,
@@ -107,6 +109,7 @@ def insert_expense(
             owed_by,
             paid_by_user_id,
             owed_by_user_id,
+            owed_by_invite_id,
             split_type,
             split_value,
             amount_owed,
@@ -129,6 +132,11 @@ if not household_id:
 child_options = seed_default_children_if_empty(household_id)
 
 members = fetch_household_members(household_id, current_user["user_id"])
+
+pending_invites = fetch_pending_household_invites(
+    household_id,
+    current_user["user_id"],
+)
 
 current_user_member = {
     "user_id": current_user["user_id"],
@@ -167,8 +175,21 @@ member_options = {
     }
     for member in members
 }
+
+pending_invite_options = {
+    f"{invite['invited_email']} (Pending Invite)": {
+        "id": None,
+        "invite_id": invite["id"],
+        "name": invite["invited_email"],
+        "email": invite["invited_email"],
+        "role": "pending",
+    }
+    for invite in pending_invites
+}
+
 member_labels = list(member_options.keys())
-participant_labels = member_labels + [OTHER_PARTICIPANT_LABEL]
+pending_invite_labels = list(pending_invite_options.keys())
+participant_labels = member_labels + list(pending_invite_options.keys()) + [OTHER_PARTICIPANT_LABEL]
 
 default_paid_by_index = 0
 for i, label in enumerate(member_labels):
@@ -239,8 +260,23 @@ if submitted:
     def resolve_participant(label, external_name):
         if label == OTHER_PARTICIPANT_LABEL:
             name = (external_name or "").strip()
-            return {"id": None, "name": name, "email": "", "role": "external"}
-        return member_options[label]
+            return {
+                "id": None,
+                "invite_id": None,
+                "name": name,
+                "email": "",
+                "role": "external",
+            }
+
+        if label in pending_invite_options:
+            return pending_invite_options[label]
+
+        member = member_options[label]
+
+        return {
+            **member,
+            "invite_id": None,
+        }
 
     paid_by_member = resolve_participant(paid_by_label, paid_by_external_name)
     owed_by_member = resolve_participant(owed_by_label, owed_by_external_name)
@@ -272,6 +308,7 @@ if submitted:
             owed_by=owed_by_member["name"],
             paid_by_user_id=paid_by_member["id"],
             owed_by_user_id=owed_by_member["id"],
+            owed_by_invite_id=owed_by_member.get("invite_id"),
             split_type=split_type,
             split_value=round(split_value, 2),
             amount_owed=amount_owed,

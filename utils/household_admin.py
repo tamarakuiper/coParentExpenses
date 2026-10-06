@@ -103,6 +103,49 @@ def fetch_household_members(household_id, viewer_user_id):
     return rows
 
 
+def fetch_pending_household_invites(household_id, viewer_user_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT role
+        FROM household_members
+        WHERE household_id = ?
+          AND user_id = ?
+        LIMIT 1
+        """,
+        (household_id, viewer_user_id),
+    )
+
+    viewer_membership = cursor.fetchone()
+    viewer_role = _get(viewer_membership, "role", 0)
+
+    if viewer_role != "owner":
+        conn.close()
+        return []
+
+    cursor.execute(
+        """
+        SELECT
+            id,
+            invited_email,
+            status,
+            expires_at,
+            created_at
+        FROM household_invites
+        WHERE household_id = ?
+          AND status = 'pending'
+        ORDER BY created_at ASC
+        """,
+        (household_id,),
+    )
+
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+
 def remove_household_member(household_id, acting_user_id, target_user_id):
     conn = get_connection()
     cursor = conn.cursor()

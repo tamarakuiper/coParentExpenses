@@ -117,7 +117,8 @@ def ensure_expense_schema():
     _ensure_column(cursor, "expenses", "created_by_user_id", "INTEGER")
     _ensure_column(cursor, "expenses", "updated_by_user_id", "INTEGER")
     _ensure_column(cursor, "expenses", "paid_by_user_id", "INTEGER")
-    _ensure_column(cursor, "expenses", "owed_by_user_id", "INTEGER")
+    _ensure_column(cursor, "expenses", "split_type", "TEXT")
+    _ensure_column(cursor, "expenses", "owed_by_invite_id", "INTEGER")
     _ensure_column(cursor, "expenses", "updated_at", "TEXT")
 
     _ensure_payment_table(cursor)

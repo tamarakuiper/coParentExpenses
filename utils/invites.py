@@ -12,6 +12,7 @@ def _utc_now():
 def _parse_datetime(value):
     if not value:
         return None
+
     try:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
@@ -30,19 +31,34 @@ def get_user_household(conn, user_id):
     ).fetchone()
 
 
-def create_household_invite(invited_email, invited_by_user_id, expires_in_days=7):
+def create_household_invite(
+    invited_email,
+    invited_by_user_id,
+    expires_in_days=7,
+):
     invited_email = invited_email.strip().lower()
+
     if not invited_email:
         raise ValueError("Invite email is required.")
 
     conn = get_connection()
 
-    inviter_membership = get_user_household(conn, invited_by_user_id)
+    inviter_membership = get_user_household(
+        conn,
+        invited_by_user_id,
+    )
+
     if not inviter_membership:
         conn.close()
-        raise ValueError("Inviting user is not assigned to a household.")
+        raise ValueError(
+            "Inviting user is not assigned to a household."
+        )
 
-    household_id = inviter_membership["household_id"] if isinstance(inviter_membership, sqlite3.Row) else inviter_membership[0]
+    household_id = (
+        inviter_membership["household_id"]
+        if isinstance(inviter_membership, sqlite3.Row)
+        else inviter_membership[0]
+    )
 
     existing_pending = conn.execute(
         """
@@ -58,15 +74,29 @@ def create_household_invite(invited_email, invited_by_user_id, expires_in_days=7
     ).fetchone()
 
     if existing_pending:
-        expires_at = existing_pending["expires_at"] if isinstance(existing_pending, sqlite3.Row) else existing_pending[2]
-        dt = _parse_datetime(expires_at)
-        if dt and dt > _utc_now():
-            token = existing_pending["token"] if isinstance(existing_pending, sqlite3.Row) else existing_pending[1]
+        expires_at = (
+            existing_pending["expires_at"]
+            if isinstance(existing_pending, sqlite3.Row)
+            else existing_pending[2]
+        )
+
+        expires_dt = _parse_datetime(expires_at)
+
+        if expires_dt and expires_dt > _utc_now():
+            token = (
+                existing_pending["token"]
+                if isinstance(existing_pending, sqlite3.Row)
+                else existing_pending[1]
+            )
+
             conn.close()
             return token
 
     token = secrets.token_urlsafe(24)
-    expires_at = (_utc_now() + timedelta(days=expires_in_days)).isoformat()
+
+    expires_at = (
+        _utc_now() + timedelta(days=expires_in_days)
+    ).isoformat()
 
     conn.execute(
         """
@@ -80,15 +110,24 @@ def create_household_invite(invited_email, invited_by_user_id, expires_in_days=7
         )
         VALUES (?, ?, ?, ?, 'pending', ?)
         """,
-        (household_id, invited_email, invited_by_user_id, token, expires_at),
+        (
+            household_id,
+            invited_email,
+            invited_by_user_id,
+            token,
+            expires_at,
+        ),
     )
+
     conn.commit()
     conn.close()
+
     return token
 
 
 def get_invite_by_token(token):
     conn = get_connection()
+
     invite = conn.execute(
         """
         SELECT
@@ -113,14 +152,20 @@ def get_invite_by_token(token):
         """,
         (token,),
     ).fetchone()
+
     conn.close()
     return invite
 
 
-def accept_household_invite(token, current_user_id, current_user_email):
+def accept_household_invite(
+    token,
+    current_user_id,
+    current_user_email,
+):
     current_user_email = current_user_email.strip().lower()
 
     conn = get_connection()
+
     invite = conn.execute(
         """
         SELECT
@@ -140,11 +185,35 @@ def accept_household_invite(token, current_user_id, current_user_email):
         conn.close()
         return False, "Invite not found."
 
-    invite_id = invite["id"] if isinstance(invite, sqlite3.Row) else invite[0]
-    household_id = invite["household_id"] if isinstance(invite, sqlite3.Row) else invite[1]
-    invited_email = invite["invited_email"] if isinstance(invite, sqlite3.Row) else invite[2]
-    status = invite["status"] if isinstance(invite, sqlite3.Row) else invite[3]
-    expires_at = invite["expires_at"] if isinstance(invite, sqlite3.Row) else invite[4]
+    invite_id = (
+        invite["id"]
+        if isinstance(invite, sqlite3.Row)
+        else invite[0]
+    )
+
+    household_id = (
+        invite["household_id"]
+        if isinstance(invite, sqlite3.Row)
+        else invite[1]
+    )
+
+    invited_email = (
+        invite["invited_email"]
+        if isinstance(invite, sqlite3.Row)
+        else invite[2]
+    )
+
+    status = (
+        invite["status"]
+        if isinstance(invite, sqlite3.Row)
+        else invite[3]
+    )
+
+    expires_at = (
+        invite["expires_at"]
+        if isinstance(invite, sqlite3.Row)
+        else invite[4]
+    )
 
     if status != "pending":
         conn.close()
@@ -152,9 +221,13 @@ def accept_household_invite(token, current_user_id, current_user_email):
 
     if invited_email.lower() != current_user_email:
         conn.close()
-        return False, "This invite was sent to a different email address."
+        return (
+            False,
+            "This invite was sent to a different email address.",
+        )
 
     expires_dt = _parse_datetime(expires_at)
+
     if expires_dt and expires_dt <= _utc_now():
         conn.execute(
             """
@@ -164,15 +237,34 @@ def accept_household_invite(token, current_user_id, current_user_email):
             """,
             (invite_id,),
         )
+
         conn.commit()
         conn.close()
+
         return False, "This invite has expired."
 
-    existing_membership = get_user_household(conn, current_user_id)
+    existing_membership = get_user_household(
+        conn,
+        current_user_id,
+    )
+
     if existing_membership:
-        existing_household_id = existing_membership["household_id"] if isinstance(existing_membership, sqlite3.Row) else existing_membership[0]
+        existing_household_id = (
+            existing_membership["household_id"]
+            if isinstance(existing_membership, sqlite3.Row)
+            else existing_membership[0]
+        )
 
         if existing_household_id == household_id:
+            # Make sure any pending-invite expenses
+            # are still attached to this user.
+            _attach_invite_expenses_to_user(
+                conn=conn,
+                invite_id=invite_id,
+                household_id=household_id,
+                user_id=current_user_id,
+            )
+
             conn.execute(
                 """
                 UPDATE household_invites
@@ -182,8 +274,10 @@ def accept_household_invite(token, current_user_id, current_user_email):
                 """,
                 (current_user_id, invite_id),
             )
+
             conn.commit()
             conn.close()
+
             return True, "You are already in this household."
 
         existing_expense_count = conn.execute(
@@ -193,12 +287,21 @@ def accept_household_invite(token, current_user_id, current_user_email):
             WHERE household_id = ?
               AND created_by_user_id = ?
             """,
-            (existing_household_id, current_user_id),
+            (
+                existing_household_id,
+                current_user_id,
+            ),
         ).fetchone()[0]
 
         if existing_expense_count > 0:
             conn.close()
-            return False, "This account already has expenses in another household. Move them manually before joining a new household."
+
+            return (
+                False,
+                "This account already has expenses in another "
+                "household. Move them manually before joining "
+                "a new household.",
+            )
 
         conn.execute(
             """
@@ -210,10 +313,24 @@ def accept_household_invite(token, current_user_id, current_user_email):
 
     conn.execute(
         """
-        INSERT OR IGNORE INTO household_members (household_id, user_id, role)
+        INSERT OR IGNORE INTO household_members (
+            household_id,
+            user_id,
+            role
+        )
         VALUES (?, ?, 'member')
         """,
-        (household_id, current_user_id),
+        (
+            household_id,
+            current_user_id,
+        ),
+    )
+
+    _attach_invite_expenses_to_user(
+        conn=conn,
+        invite_id=invite_id,
+        household_id=household_id,
+        user_id=current_user_id,
     )
 
     conn.execute(
@@ -223,9 +340,56 @@ def accept_household_invite(token, current_user_id, current_user_email):
             accepted_by_user_id = ?
         WHERE id = ?
         """,
-        (current_user_id, invite_id),
+        (
+            current_user_id,
+            invite_id,
+        ),
     )
 
     conn.commit()
     conn.close()
+
     return True, "Invite accepted."
+
+
+def _attach_invite_expenses_to_user(
+    conn,
+    invite_id,
+    household_id,
+    user_id,
+):
+    user_row = conn.execute(
+        """
+        SELECT full_name
+        FROM users
+        WHERE id = ?
+        LIMIT 1
+        """,
+        (user_id,),
+    ).fetchone()
+
+    if not user_row:
+        return
+
+    full_name = (
+        user_row["full_name"]
+        if isinstance(user_row, sqlite3.Row)
+        else user_row[0]
+    )
+
+    conn.execute(
+        """
+        UPDATE expenses
+        SET owed_by_user_id = ?,
+            owed_by_invite_id = NULL,
+            owed_by = ?
+        WHERE household_id = ?
+          AND owed_by_invite_id = ?
+        """,
+        (
+            user_id,
+            full_name,
+            household_id,
+            invite_id,
+        ),
+    )

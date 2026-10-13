@@ -1,11 +1,12 @@
-import streamlit as st
 import os
+import streamlit as st
 
 from utils.auth import is_logged_in, get_current_user, logout_user, require_login
 from utils.db import get_connection
 from init_db import init_db
-from utils.invites import create_household_invite
+from utils.invites import create_household_invite, list_household_invites, revoke_household_invite
 from utils.household_admin import fetch_household_members, remove_household_member
+from utils.emailer import send_household_invite_email
 
 st.set_page_config(
     page_title="Co-Parent Shared Expenses",
@@ -78,13 +79,7 @@ def render_logged_in_home():
                     invited_by_user_id=current_user["user_id"],
                 )
 
-    
-
-                base_url = os.getenv(
-                    "APP_BASE_URL",
-                    "http://localhost:8501"
-                ).rstrip("/")
-
+                base_url = os.getenv("APP_BASE_URL", "http://localhost:8501").rstrip("/")
                 signup_link = f"{base_url}/Sign_Up?invite={token}"
 
                 st.success("Invite created.")
@@ -101,6 +96,52 @@ def render_logged_in_home():
             except Exception as exc:
                 st.error(f"Something went wrong while creating the invite: {exc}")
         st.markdown("---")
+    if current_user.get("role") == "owner":
+        st.subheader("Household invitations")
+        st.caption("Pending invitations can be copied, resent, or revoked. Expired invitations require a new invitation.")
+        try:
+            invites = list_household_invites(current_user["household_id"], current_user["user_id"])
+        except PermissionError as exc:
+            st.error(str(exc))
+            invites = []
+
+        if not invites:
+            st.info("No invitations found for this household.")
+        else:
+            for invite in invites:
+                status = invite["display_status"]
+                with st.expander(f"{invite['invited_email']} — {status.title()} (#{invite['id']})", expanded=(status == "pending")):
+                    st.write(f"Created (UTC): {invite['created_at']}")
+                    st.write(f"Expires (UTC): {invite['expires_at']}")
+                    if status == "pending":
+                        base_url = os.getenv("APP_BASE_URL", "http://localhost:8501").rstrip("/")
+                        link = f"{base_url}/Sign_Up?invite={invite['token']}"
+                        st.code(link, language=None)
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("Resend email", key=f"resend_inv_{invite['id']}"):
+                                try:
+                                    send_household_invite_email(
+                                        to_email=invite["invited_email"],
+                                        inviter_name=current_user.get("user_name", "A user"),
+                                        household_name=current_user["household_name"],
+                                        token=invite["token"],
+                                    )
+                                    st.success("Invitation email resent.")
+                                except Exception as exc:
+                                    st.error(f"Unable to resend invitation: {exc}")
+                        with col2:
+                            confirm = st.checkbox("Confirm revoke", key=f"confirm_rev_{invite['id']}")
+                            if st.button("Revoke", key=f"revoke_inv_{invite['id']}", disabled=not confirm):
+                                ok, message = revoke_household_invite(invite["id"], current_user["household_id"], current_user["user_id"])
+                                if ok:
+                                    st.success(message)
+                                    st.rerun()
+                                else:
+                                    st.error(message)
+                    elif status == "expired":
+                        st.info("Expired. Create a new invitation above to issue a fresh link.")
+
     st.subheader("Manage household")
 
     members = fetch_household_members(

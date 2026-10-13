@@ -1,4 +1,5 @@
 import streamlit as st
+import os
 
 from utils.auth import is_logged_in, get_current_user, logout_user, require_login
 from utils.db import get_connection
@@ -77,7 +78,14 @@ def render_logged_in_home():
                     invited_by_user_id=current_user["user_id"],
                 )
 
-                signup_link = f"http://localhost:8501/Sign_Up?invite={token}"
+    
+
+                base_url = os.getenv(
+                    "APP_BASE_URL",
+                    "http://localhost:8501"
+                ).rstrip("/")
+
+                signup_link = f"{base_url}/Sign_Up?invite={token}"
 
                 st.success("Invite created.")
                 st.write("Share this sign-up link:")

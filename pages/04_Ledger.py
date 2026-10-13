@@ -11,7 +11,6 @@ from utils.payments import fetch_payments_by_expense
 from utils.household_config import OTHER_PARTICIPANT_LABEL
 from utils.household_children import seed_default_children_if_empty
 from utils.schema import ensure_expense_schema
-from utils.household_admin import fetch_pending_household_invites
 
 st.set_page_config(page_title="Ledger", page_icon="📒", layout="wide")
 
@@ -89,7 +88,6 @@ def fetch_expenses(household_id):
             owed_by,
             paid_by_user_id,
             owed_by_user_id,
-            owed_by_invite_id,
             split_type,
             split_value,
             amount_owed,
@@ -122,7 +120,6 @@ def update_expense(
     owed_by_name,
     paid_by_user_id,
     owed_by_user_id,
-    owed_by_invite_id,
     split_type,
     split_value,
     amount_owed,
@@ -147,7 +144,6 @@ def update_expense(
             owed_by = ?,
             paid_by_user_id = ?,
             owed_by_user_id = ?,
-            owed_by_invite_id = ?,
             split_type = ?,
             split_value = ?,
             amount_owed = ?,
@@ -169,7 +165,6 @@ def update_expense(
             owed_by_name,
             paid_by_user_id,
             owed_by_user_id,
-            owed_by_invite_id,
             split_type,
             split_value,
             amount_owed,
@@ -218,14 +213,9 @@ st.write("View shared expenses, receipts, payments, and outstanding balances.")
 household_child_options = seed_default_children_if_empty(current_user["household_id"])
 
 members = fetch_household_members(current_user["household_id"])
-pending_invites = fetch_pending_household_invites(
-    current_user["household_id"],
-    current_user["user_id"],
-)
 if not members:
     st.error("No household members found.")
     st.stop()
-    
 
 member_options = {
     f"{member['full_name']} ({member['email']})": {
@@ -236,26 +226,8 @@ member_options = {
     }
     for member in members
 }
-
-pending_invite_options = {
-    f"{invite['invited_email']} (Pending Invite)": {
-        "id": None,
-        "invite_id": invite["id"],
-        "name": invite["invited_email"],
-        "email": invite["invited_email"],
-        "role": "pending",
-    }
-    for invite in pending_invites
-}
-
 member_labels = list(member_options.keys())
-pending_invite_labels = list(pending_invite_options.keys())
-
-participant_labels = (
-    member_labels
-    + pending_invite_labels
-    + [OTHER_PARTICIPANT_LABEL]
-)
+participant_labels = member_labels + [OTHER_PARTICIPANT_LABEL]
 
 rows = fetch_expenses(current_user["household_id"])
 payments_by_expense = fetch_payments_by_expense(current_user["household_id"])
@@ -286,7 +258,6 @@ for row in rows:
             "owed_by": row["owed_by"] or "",
             "paid_by_user_id": row["paid_by_user_id"],
             "owed_by_user_id": row["owed_by_user_id"],
-            "owed_by_invite_id": row["owed_by_invite_id"],
             "split_type": row["split_type"] or "percent",
             "split_value": float(row["split_value"] or 0),
             "amount_owed": amount_owed,
@@ -341,40 +312,45 @@ if not filtered:
     st.warning("No expenses match the selected filters.")
     st.stop()
 
+# Keep expense IDs internally for forms, payments, and editing, but do not
+# expose database identifiers in the user-facing Ledger summary.
 display_rows = []
 for item in filtered:
-    receipt_name = Path(item["receipt_path"]).name if item["receipt_path"] else ""
-    receipt_display = receipt_name if receipt_name else "-"
-
+    detail = item["description"].strip() or item["category"] or "Expense"
+    context = " · ".join(part for part in (item["child_name"], item["category"]) if part)
     display_rows.append(
         {
-            "Date": item["expense_date"],
-            "Child": item["child_name"],
-            "Category": item["category"],
-            "Description": item["description"],
-            "Amount": f"${item['amount']:,.2f}",
-            "Paid By": item["paid_by"],
-            "Owed By": item["owed_by"],
-            "Amount Owed": f"${item['amount_owed']:,.2f}",
-            "Amount Paid": f"${item['amount_paid']:,.2f}",
-            "Outstanding": f"${item['outstanding']:,.2f}",
-            "Status": item["status"],
-            "Receipt": receipt_display,
-            "Entered By You": "Yes" if item["created_by_user_id"] == current_user["user_id"] else "No",
+            "Date": datetime.strptime(item["expense_date"], "%Y-%m-%d").date() if item["expense_date"] else None,
+            "Description": detail + (f" — {context}" if context else ""),
+            "Total": item["amount"],
+            "Outstanding": item["outstanding"],
         }
     )
 
 st.subheader("Expenses")
-st.dataframe(display_rows, use_container_width=True, hide_index=True)
+st.caption("Newest expense dates first. Select an expense below for receipts, payments, and editing.")
+st.dataframe(
+    display_rows,
+    use_container_width=True,
+    hide_index=True,
+    column_config={
+        "Date": st.column_config.DateColumn("Date", format="MM/DD/YYYY"),
+        "Description": st.column_config.TextColumn("Description", width="large"),
+        "Total": st.column_config.NumberColumn("Total", format="$%.2f"),
+        "Outstanding": st.column_config.NumberColumn("Outstanding", format="$%.2f"),
+    },
+    column_order=["Date", "Description", "Total", "Outstanding"],
+)
 
-st.caption("You can edit or delete only expenses that you entered.")
+st.caption("Only expenses you entered can be edited or deleted.")
 
 for item in filtered:
     can_edit = item["created_by_user_id"] == current_user["user_id"]
-
+    detail = item["description"].strip() or item["category"] or "Expense"
+    child_label = f" · {item['child_name']}" if item["child_name"] else ""
     expander_title = (
-        f"#{item['id']} • {item['expense_date']} • {item['category']} • "
-        f"${item['amount']:,.2f} • Outstanding ${item['outstanding']:,.2f}"
+        f"{item['expense_date']} · {detail}{child_label} · "
+        f"Total ${item['amount']:,.2f} · Outstanding ${item['outstanding']:,.2f}"
     )
 
     with st.expander(expander_title):
@@ -437,40 +413,18 @@ for item in filtered:
         paid_by_default = 0
         owed_by_default = 0
 
-        # Active household members
-        for label in member_labels:
-            member = member_options[label]
+        for idx, label in enumerate(participant_labels):
+            if label == OTHER_PARTICIPANT_LABEL:
+                continue
+            if member_options[label]["id"] == item["paid_by_user_id"]:
+                paid_by_default = idx
+            if member_options[label]["id"] == item["owed_by_user_id"]:
+                owed_by_default = idx
 
-            if member["id"] == item["paid_by_user_id"]:
-                paid_by_default = participant_labels.index(label)
-
-            if member["id"] == item["owed_by_user_id"]:
-                owed_by_default = participant_labels.index(label)
-
-
-        # Pending invite
-        if item["owed_by_invite_id"] is not None:
-            for label, invite in pending_invite_options.items():
-                if invite["invite_id"] == item["owed_by_invite_id"]:
-                    owed_by_default = participant_labels.index(label)
-                    break
-
-
-        # External Paid By
         if item["paid_by_user_id"] is None:
-            paid_by_default = participant_labels.index(
-                OTHER_PARTICIPANT_LABEL
-            )
-
-
-        # External Owed By
-        if (
-            item["owed_by_user_id"] is None
-            and item["owed_by_invite_id"] is None
-        ):
-            owed_by_default = participant_labels.index(
-                OTHER_PARTICIPANT_LABEL
-            )
+            paid_by_default = participant_labels.index(OTHER_PARTICIPANT_LABEL)
+        if item["owed_by_user_id"] is None:
+            owed_by_default = participant_labels.index(OTHER_PARTICIPANT_LABEL)
 
         try:
             default_category_index = CATEGORIES.index(item["category"])
@@ -537,12 +491,7 @@ for item in filtered:
                 if edit_owed_by_label == OTHER_PARTICIPANT_LABEL:
                     edit_owed_by_external_name = st.text_input(
                         "Owed By Name",
-                        value=(
-                            item["owed_by"]
-                            if item["owed_by_user_id"] is None
-                            and item["owed_by_invite_id"] is None
-                            else ""
-                        ),
+                        value=item["owed_by"] if item["owed_by_user_id"] is None else "",
                         key=f"owed_by_external_{item['id']}",
                     )
 
@@ -573,22 +522,8 @@ for item in filtered:
             def resolve_participant(label, external_name):
                 if label == OTHER_PARTICIPANT_LABEL:
                     name = (external_name or "").strip()
-
-                    return {
-                        "id": None,
-                        "invite_id": None,
-                        "name": name,
-                    }
-
-                if label in pending_invite_options:
-                    return pending_invite_options[label]
-
-                member = member_options[label]
-
-                return {
-                    **member,
-                    "invite_id": None,
-                }
+                    return {"id": None, "name": name}
+                return member_options[label]
 
             paid_by_member = resolve_participant(edit_paid_by_label, edit_paid_by_external_name)
             owed_by_member = resolve_participant(edit_owed_by_label, edit_owed_by_external_name)
@@ -629,7 +564,6 @@ for item in filtered:
                     owed_by_name=owed_by_member["name"],
                     paid_by_user_id=paid_by_member["id"],
                     owed_by_user_id=owed_by_member["id"],
-                    owed_by_invite_id=owed_by_member.get("invite_id"),
                     split_type=edit_split_type,
                     split_value=round(edit_split_value, 2),
                     amount_owed=new_amount_owed,
